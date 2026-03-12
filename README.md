@@ -23,6 +23,5 @@ python build.py clean
 
 ## Flashing via UART bootloader
 
-Before flashing, put the MCU into bootloader mode:
-same as FPGA 8052 re-boot process
+Before flashing, put the MCU into bootloader mode (same as FPGA 8052 re-boot process):
 1. long push boot0 button and push the reset button
