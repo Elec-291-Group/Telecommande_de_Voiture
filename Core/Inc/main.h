@@ -65,8 +65,6 @@ void Error_Handler(void);
 #define motor2_hbridge2_GPIO_Port GPIOA
 #define motor1_hbridge1_Pin GPIO_PIN_0
 #define motor1_hbridge1_GPIO_Port GPIOB
-#define GREEN_LED_Pin GPIO_PIN_1
-#define GREEN_LED_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
