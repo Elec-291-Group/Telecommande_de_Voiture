@@ -136,8 +136,8 @@ int main(void)
   //htim2.Instance->PSC = 15u;
   //htim2.Instance->ARR = 262u;
   //htim2.Instance->EGR = 0x01U;   /* UG: latch new PSC/ARR immediately      */
-  HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM2_IRQn);
+  //HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
+  //HAL_NVIC_EnableIRQ(TIM2_IRQn);
   IR_RX_Init();
   HAL_TIM_Base_Start_IT(&htim2);
   printf("IR RX Ready\r\n");
@@ -219,39 +219,12 @@ int main(void)
         }
       }
     }
-
+    
     /* ── BT proxy: forward "B:<payload>\r\n" from UART1 to JDY-23 on UART2,
        then echo the module's reply back to UART1. ──────────────────────── */
-    {
-      uint8_t ch;
-      if (HAL_UART_Receive(&huart1, &ch, 1u, 1u) == HAL_OK) {
-        if (ch == '\r' || ch == '\n') {
-          if (u1_len > 0u) {
-            u1_line[u1_len] = '\0';
-            if (u1_line[0] == 'B' && u1_line[1] == ':' && u1_len > 2u) {
-              /* Send payload + CRLF to BT module */
-              const uint8_t crlf[2] = {'\r', '\n'};
-              HAL_UART_Transmit(&huart2, u1_line + 2u, u1_len - 2u, HAL_MAX_DELAY);
-              HAL_UART_Transmit(&huart2, (uint8_t *)crlf, 2u, HAL_MAX_DELAY);
-              /* Collect reply: 500 ms for first byte, 50 ms between bytes */
-              uint8_t  reply[256];
-              uint16_t rlen = 0u;
-              while (rlen < sizeof(reply)) {
-                uint32_t tmo = (rlen == 0u) ? 500u : 50u;
-                if (HAL_UART_Receive(&huart2, &reply[rlen], 1u, tmo) != HAL_OK) break;
-                rlen++;
-              }
-              if (rlen > 0u) {
-                HAL_UART_Transmit(&huart1, reply, rlen, HAL_MAX_DELAY);
-              }
-            }
-            u1_len = 0u;
-          }
-        } else if (u1_len < U1_LINE_MAX - 1u) {
-          u1_line[u1_len++] = ch;
-        }
-      }
-    }
+    
+       
+    
   }
   /* USER CODE END 3 */
 }
