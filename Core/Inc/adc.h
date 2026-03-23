@@ -1,9 +1,9 @@
 /* USER CODE BEGIN Header */
 /**
   ******************************************************************************
-  * @file    usart.h
+  * @file    adc.h
   * @brief   This file contains all the function prototypes for
-  *          the usart.c file
+  *          the adc.c file
   ******************************************************************************
   * @attention
   *
@@ -18,8 +18,8 @@
   */
 /* USER CODE END Header */
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __USART_H__
-#define __USART_H__
+#ifndef __ADC_H__
+#define __ADC_H__
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,18 +32,29 @@ extern "C" {
 
 /* USER CODE END Includes */
 
-extern UART_HandleTypeDef huart1;
-
-extern UART_HandleTypeDef huart2;
+extern ADC_HandleTypeDef hadc;
 
 /* USER CODE BEGIN Private defines */
+#ifndef ADC_H
+#define ADC_H
+// calibrated VDDA
+extern uint32_t VDDA;
+
+#endif
+
+// the vrefint adc value is measured at exactly 3V.
+// the formula Aref_cal * 3 / Aref_measured gives us VDDA. Which could be used for calibration purpose
+#define AREFINT_CAL (*(volatile uint16_t*)0x1FF80078) // access the vrefint calibrated adc value
 
 /* USER CODE END Private defines */
 
-void MX_USART1_UART_Init(void);
-void MX_USART2_UART_Init(void);
+void MX_ADC_Init(void);
 
 /* USER CODE BEGIN Prototypes */
+
+void vdda_calibration(void);
+uint32_t read_adc_channel(uint32_t channel);
+uint32_t adc_to_voltage(uint32_t adc_value);
 
 /* USER CODE END Prototypes */
 
@@ -51,5 +62,5 @@ void MX_USART2_UART_Init(void);
 }
 #endif
 
-#endif /* __USART_H__ */
+#endif /* __ADC_H__ */
 
