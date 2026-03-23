@@ -60,8 +60,8 @@ static uint16_t u1_len;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-void Set_Car_Speed(int speed);
-
+void Set_Left_Motor(int speed);
+void Set_Right_Motor(int speed);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -109,13 +109,12 @@ int main(void)
   MX_TIM2_Init();
   MX_ADC_Init();
   MX_I2C1_Init();
-  MX_USART2_UART_Init();
-  MX_TIM22_Init();
   /* USER CODE BEGIN 2 */
   //starting PWM generation
-  HAL_TIM_PWM_Start(&htim22, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim22, TIM_CHANNEL_2);
-  
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
   
   // Configure ADC channel
   HAL_ADCEx_Calibration_Start(&hadc, ADC_SINGLE_ENDED);
@@ -129,14 +128,14 @@ int main(void)
   char buffer[20];
 
   MX_I2C1_Init();
-  MX_USART2_UART_Init();
+  //MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   /* Configure TIM2 for a 263 µs periodic interrupt used by the IR FSM.
      T = 10 / 38000 Hz = 263.16 µs.
      HSI = 16 MHz → PSC = 15 → timer clock = 1 MHz → ARR = 262 → 263 µs. */
-  htim2.Instance->PSC = 15u;
-  htim2.Instance->ARR = 262u;
-  htim2.Instance->EGR = 0x01U;   /* UG: latch new PSC/ARR immediately      */
+  //htim2.Instance->PSC = 15u;
+  //htim2.Instance->ARR = 262u;
+  //htim2.Instance->EGR = 0x01U;   /* UG: latch new PSC/ARR immediately      */
   HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(TIM2_IRQn);
   IR_RX_Init();
@@ -159,10 +158,12 @@ int main(void)
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
 
     //test sequence
-    Set_Car_Speed(100); //full speed forward
+    Set_Left_Motor(100);  // Left motor full forward
+    Set_Right_Motor(100); // Right motor full forward
     HAL_Delay(2000);
 
-    Set_Car_Speed(0); //stop
+    Set_Left_Motor(0);    // Stop
+    Set_Right_Motor(0);   // Stop
     //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
     /*
     if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1)){
@@ -294,10 +295,8 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_USART2
-                              |RCC_PERIPHCLK_I2C1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_I2C1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK2;
-  PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
   PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_PCLK1;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
@@ -306,34 +305,44 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-void Set_Car_Speed(int speed){
-  //speed should be between 0 and 100
-  if(speed > 100) 
-    speed = 100;
-  if(speed < -100) 
-    speed = -100;
-  //STOP
-  if(speed == 0) {
-    __HAL_TIM_SET_COMPARE(&htim22, TIM_CHANNEL_1, 0);
-    __HAL_TIM_SET_COMPARE(&htim22, TIM_CHANNEL_2, 0);
-  }
-  //FORWARD
-  else if(speed > 0) {
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
 
-    // Multiply by 10 (e.g., 100% * 10 = 1000 ARR)
-    __HAL_TIM_SET_COMPARE(&htim22, TIM_CHANNEL_1, speed * 10); 
-    __HAL_TIM_SET_COMPARE(&htim22, TIM_CHANNEL_2, speed * 10);
+// LEFT MOTOR (TIM2)
+// CH1 (PA15) = Forward Pin | CH2 (PB3) = Reverse Pin
+void Set_Left_Motor(int speed){
+  if(speed > 100) speed = 100;
+  if(speed < -100) speed = -100;
+  
+  if(speed == 0) { // STOP
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
   }
-  //BACKWARD
-  else{
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+  else if(speed > 0) { // FORWARD: CH1 gets PWM, CH2 stays 0
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed * 10); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
+  }
+  else { // REVERSE: CH1 stays 0, CH2 gets PWM
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, (-speed) * 10);
+  }
+}
 
-    // Multiply by -10 (e.g., -100% * -10 = 1000 ARR)
-    __HAL_TIM_SET_COMPARE(&htim22, TIM_CHANNEL_1, (-speed) * 10); 
-    __HAL_TIM_SET_COMPARE(&htim22, TIM_CHANNEL_2, (-speed) * 10);
+// RIGHT MOTOR (TIM2)
+// CH3 (PA2) = Forward Pin | CH4 (PA3) = Reverse Pin
+void Set_Right_Motor(int speed){
+  if(speed > 100) speed = 100;
+  if(speed < -100) speed = -100;
+  
+  if(speed == 0) { // STOP
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 0);
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, 0);
+  }
+  else if(speed > 0) { // FORWARD: CH3 gets PWM, CH4 stays 0
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, speed * 10); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, 0);
+  }
+  else { // REVERSE: CH3 stays 0, CH4 gets PWM
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 0); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, (-speed) * 10);
   }
 }
 
