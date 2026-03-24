@@ -1,36 +1,32 @@
-# =============================================================================
-# build.ps1 - Build & flash script for STM32CubeMX CMake projects
-# Usage:
-#   .\build.ps1 build                    # make + elf->bin
-#   .\build.ps1 flash -Port COM3         # flash existing .bin
-#   .\build.ps1 clean                    # clean build directory
-#
-# NOTE: Run cmake once manually from Git Bash before first build:
-#   cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake -G Ninja
-# IMPORTANT: -G Ninja is required. Without it, CMake defaults to Visual Studio
-#            on Windows and uses MSVC instead of arm-none-eabi-gcc.
-# =============================================================================
-
 param(
     [string]$Target    = "build",
-    [string]$Port      = "",
+    [string]$Port      = "COM21",   
     [string]$Baud      = "115200",
-    [string]$FlashTool = ""
+    [string]$FlashTool = "C:\Users\Owner\Downloads\STM32L051 (1)\stm32flash\stm32flash.exe"
 )
-
-# --- Auto-detect stm32flash if not specified ---------------------------------
-if (-not $FlashTool) {
-    $candidates = @(
-        "D:\stm32flash\stm32flash.exe",
-        "C:\stm32flash\stm32flash.exe"
-    )
-    $FlashTool = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-}
 
 $ErrorActionPreference = "Stop"
 
-# --- Auto-detect project name from CMakeLists.txt ----------------------------
+# --- Project root ---
 $ProjectRoot = $PSScriptRoot
+
+# --- Auto-detect stm32flash ---
+if (-not $FlashTool) {
+    $cmd = Get-Command stm32flash.exe -ErrorAction SilentlyContinue
+    if ($cmd) {
+        $FlashTool = $cmd.Source
+    } else {
+        $candidates = @(
+            "D:\stm32flash\stm32flash.exe",
+            "C:\stm32flash\stm32flash.exe",
+            "$ProjectRoot\stm32flash.exe",
+            "$env:USERPROFILE\Downloads\stm32flash.exe"
+        )
+        $FlashTool = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    }
+}
+
+# --- Detect project name ---
 $CmakeLists  = Get-Content "$ProjectRoot\CMakeLists.txt" -Raw
 if ($CmakeLists -match 'set\s*\(\s*CMAKE_PROJECT_NAME\s+([\w_]+)') {
     $ProjectName = $Matches[1]
@@ -38,67 +34,80 @@ if ($CmakeLists -match 'set\s*\(\s*CMAKE_PROJECT_NAME\s+([\w_]+)') {
     throw "Cannot find CMAKE_PROJECT_NAME in CMakeLists.txt"
 }
 
-# --- Derived paths -----------------------------------------------------------
+# --- Paths ---
 $BuildDir = "$ProjectRoot\build"
 $ElfFile  = "$BuildDir\$ProjectName.elf"
 $BinFile  = "$BuildDir\$ProjectName.bin"
 
-# --- Fix MinGW linker temp file issue ----------------------------------------
+# --- Fix temp path ---
 $env:TMP  = "$env:USERPROFILE\AppData\Local\Temp"
 $env:TEMP = "$env:USERPROFILE\AppData\Local\Temp"
 
-# --- Targets -----------------------------------------------------------------
+# --- Targets ---
 switch ($Target) {
 
     "build" {
         if (-not (Test-Path $BuildDir)) {
-            throw "build/ not found. Run cmake first from Git Bash:`n  cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake -G Ninja"
+            throw "build/ not found. Run cmake first."
         }
+
         Write-Host "[cmake] Building '$ProjectName'..." -ForegroundColor Cyan
+
         Push-Location $ProjectRoot
         cmake --build build
         $exitCode = $LASTEXITCODE
         Pop-Location
+
         if ($exitCode -ne 0) { throw "Build failed" }
 
-        Write-Host "[objcopy] $ProjectName.elf -> $ProjectName.bin" -ForegroundColor Cyan
+        Write-Host "[objcopy] ELF -> BIN" -ForegroundColor Cyan
         arm-none-eabi-objcopy -O binary $ElfFile $BinFile
+
+        if (-not (Test-Path $BinFile)) {
+            throw "BIN generation failed"
+        }
+
         Write-Host "[done] $BinFile" -ForegroundColor Green
     }
 
     "flash" {
-        if (-not $Port) {
-            Write-Host "[error] -Port is required for flash." -ForegroundColor Red
-            Write-Host "Available COM ports:" -ForegroundColor Yellow
-            $ports = [System.IO.Ports.SerialPort]::GetPortNames() | Sort-Object
-            if ($ports.Count -eq 0) {
-                Write-Host "  (none detected)" -ForegroundColor DarkGray
-            } else {
-                foreach ($p in $ports) {
-                    Write-Host "  $p" -ForegroundColor White
-                }
-            }
-            Write-Host "Usage:" -ForegroundColor Yellow
-            Write-Host "  .\build.ps1 flash -Port COM3" -ForegroundColor White
-            exit 1
-        }
+
+        # --- Port check ---
         $availablePorts = [System.IO.Ports.SerialPort]::GetPortNames()
+
         if ($Port -notin $availablePorts) {
             Write-Host "[error] Port '$Port' not found." -ForegroundColor Red
             Write-Host "Available COM ports:" -ForegroundColor Yellow
+
             if ($availablePorts.Count -eq 0) {
                 Write-Host "  (none detected)" -ForegroundColor DarkGray
             } else {
-                ($availablePorts | Sort-Object) | ForEach-Object { Write-Host "  $_" -ForegroundColor White }
+                ($availablePorts | Sort-Object) | ForEach-Object {
+                    Write-Host "  $_" -ForegroundColor White
+                }
             }
             exit 1
         }
-        if (-not (Test-Path $BinFile))   { throw "$ProjectName.bin not found - run build first" }
-        if (-not (Test-Path $FlashTool)) { throw "stm32flash not found at: $FlashTool" }
-        Write-Host "[flash] Writing to $Port at $Baud baud..." -ForegroundColor Cyan
+
+        # --- File checks ---
+        if (-not (Test-Path $BinFile)) {
+            throw "$ProjectName.bin not found - run build first"
+        }
+
+        if (-not $FlashTool -or -not (Test-Path $FlashTool)) {
+            throw "stm32flash not found. Pass -FlashTool path or install it."
+        }
+
+        Write-Host "[flash] Using: $FlashTool" -ForegroundColor Cyan
+        Write-Host "[flash] Writing to $Port @ $Baud..." -ForegroundColor Cyan
+
         & $FlashTool -b $Baud -w $BinFile -v -g 0x08000000 $Port
-        if ($LASTEXITCODE -ne 0) { throw "Flash failed" }
-        Write-Host "[done] Flash successful" -ForegroundColor Green
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Flash failed"
+        }
+
+        Write-Host "[done] Flash successful 🚀" -ForegroundColor Green
     }
 
     "clean" {
@@ -112,6 +121,6 @@ switch ($Target) {
 
     default {
         Write-Host "Unknown target: $Target"
-        Write-Host "Valid targets: build (default), flash, clean"
+        Write-Host "Valid targets: build, flash, clean"
     }
 }
