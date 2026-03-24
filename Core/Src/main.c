@@ -109,6 +109,7 @@ int main(void)
   MX_TIM2_Init();
   MX_ADC_Init();
   MX_I2C1_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   //starting PWM generation
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -130,16 +131,12 @@ int main(void)
   MX_I2C1_Init();
   //MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  /* Configure TIM2 for a 263 µs periodic interrupt used by the IR FSM.
-     T = 10 / 38000 Hz = 263.16 µs.
-     HSI = 16 MHz → PSC = 15 → timer clock = 1 MHz → ARR = 262 → 263 µs. */
-  //htim2.Instance->PSC = 15u;
-  //htim2.Instance->ARR = 262u;
-  //htim2.Instance->EGR = 0x01U;   /* UG: latch new PSC/ARR immediately      */
-  //HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
-  //HAL_NVIC_EnableIRQ(TIM2_IRQn);
+  /* Configure TIM6 for a 263 µs periodic interrupt (IR FSM tick).
+     PSC=15 already set by CubeMX → 1 MHz clock. Override ARR: 262 → 263 µs. */
+  htim6.Instance->ARR = 262u;
+  htim6.Instance->EGR = 0x01U;   /* UG: latch new ARR immediately */
   IR_RX_Init();
-  HAL_TIM_Base_Start_IT(&htim2);
+  HAL_TIM_Base_Start_IT(&htim6);
   printf("IR RX Ready\r\n");
   if (VL53L0X_Init()) {
     printf("VL53L0X OK\r\n");
@@ -160,45 +157,10 @@ int main(void)
     //test sequence
     Set_Left_Motor(100);  // Left motor full forward
     Set_Right_Motor(100); // Right motor full forward
-    HAL_Delay(2000);
-
-    Set_Left_Motor(0);    // Stop
-    Set_Right_Motor(0);   // Stop
-    //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
-    /*
-    if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1)){
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-    }
-    else{
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-    }
-    */
 
     adc0 = read_adc_channel(ADC_CHANNEL_1);
     v0 = adc_to_voltage(adc0);
-
-
-    //adc_voltage = adc_value * 3300 / 4095;
-    //sprintf(buffer, "%u\n", (uint32_t)AREFINT_CAL);
-    sprintf(buffer, "%lu\n", v0);
-
-    HAL_UART_Transmit(&huart1, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
-    HAL_Delay(1000);
-
-    /*
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-    HAL_Delay(1000);
-
-    Set_Car_Speed(-50); //half speed backward
-    HAL_Delay(2000);
-
-    Set_Car_Speed(0); //stop
-    HAL_Delay(1000);
    
-    */
     /* Wait for two consecutive valid frames (address 0x0B already verified
        inside the FSM).  Frame 1 = x_byte, frame 2 = y_byte.               */
     if (IR_RX_Available() >= 2) {
@@ -209,6 +171,7 @@ int main(void)
     }
 
     /* ── VL53L0X distance read every 200 ms ─────────────────────────────── */
+    /*
     {
       static uint32_t last_dist_ms;
       if (HAL_GetTick() - last_dist_ms >= 200u) {
@@ -219,12 +182,7 @@ int main(void)
         }
       }
     }
-    
-    /* ── BT proxy: forward "B:<payload>\r\n" from UART1 to JDY-23 on UART2,
-       then echo the module's reply back to UART1. ──────────────────────── */
-    
-       
-    
+     */
   }
   /* USER CODE END 3 */
 }
