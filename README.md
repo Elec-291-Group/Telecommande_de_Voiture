@@ -4,7 +4,7 @@
 
 Run cmake once to configure the build directory:
 ```bash
-mkdir build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none-eabi.cmake
+mkdir build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none-eabi.cmake -G Ninja
 ```
 
 ---
@@ -15,7 +15,8 @@ mkdir build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none
 ```bash
 python build.py build
 python build.py flash -Port COM3          # Windows
-python build.py flash -p /dev/tty.usbserial-1410  # macOS
+ls /dev/tty.* (to check usb device) # macOS
+python build.py flash -p /dev/tty.usbserial-DU0DOMGO (with individual usb) # macOS
 python build.py clean
 ```
 
