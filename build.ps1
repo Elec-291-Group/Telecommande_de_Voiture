@@ -6,7 +6,9 @@
 #   .\build.ps1 clean                    # clean build directory
 #
 # NOTE: Run cmake once manually from Git Bash before first build:
-#   cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake
+#   cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake -G Ninja
+# IMPORTANT: -G Ninja is required. Without it, CMake defaults to Visual Studio
+#            on Windows and uses MSVC instead of arm-none-eabi-gcc.
 # =============================================================================
 
 param(
@@ -50,7 +52,7 @@ switch ($Target) {
 
     "build" {
         if (-not (Test-Path $BuildDir)) {
-            throw "build/ not found. Run cmake first from Git Bash:`n  cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake"
+            throw "build/ not found. Run cmake first from Git Bash:`n  cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake -G Ninja"
         }
         Write-Host "[cmake] Building '$ProjectName'..." -ForegroundColor Cyan
         Push-Location $ProjectRoot

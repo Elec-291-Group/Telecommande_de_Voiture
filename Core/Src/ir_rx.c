@@ -15,7 +15,7 @@
 
 #include "ir_rx.h"
 #include "main.h"   /* IR_Receiver_GPIO_Port, IR_Receiver_Pin            */
-#include "tim.h"    /* htim2                                              */
+#include "tim.h"    /* htim6                                              */
 
 /* Expected address field in every valid frame */
 #define IR_ADDR_EXPECTED  0x0Bu
@@ -165,7 +165,7 @@ void IR_RX_Tick(void)
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    if (htim->Instance == TIM2) {
+    if (htim->Instance == TIM6) {
         IR_RX_Tick();
     }
 }

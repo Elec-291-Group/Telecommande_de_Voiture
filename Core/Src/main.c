@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
-#include "dma.h"
 #include "i2c.h"
 #include "tim.h"
 #include "usart.h"
@@ -66,8 +65,8 @@ uint8_t acceleration_data[6]; //16 bits for each value
 uint16_t acceleration_xdata; 
 uint16_t acceleration_ydata; 
 uint16_t acceleration_zdata; 
-static const uint8_t init_ctrl1 = 0x40; // 01000000
-static const uint8_t init_ctrl3 = 0x44; // 01000100
+static uint8_t init_ctrl1 = 0x40; // 01000000
+static uint8_t init_ctrl3 = 0x44; // 01000100
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -140,12 +139,11 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
   MX_USART1_UART_Init();
   MX_TIM2_Init();
   MX_ADC_Init();
   MX_I2C1_Init();
-  MX_USART2_UART_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   //starting PWM generation
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -164,7 +162,7 @@ int main(void)
   char buffer[20];
 
   MX_I2C1_Init();
-  MX_USART2_UART_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   /* Configure TIM2 for a 263 µs periodic interrupt used by the IR FSM.
      T = 10 / 38000 Hz = 263.16 µs.
@@ -210,10 +208,10 @@ int main(void)
 
     HAL_Delay(1000);
     Set_Car_Speed(0); //stop
-    
+  }  
   /* USER CODE END 3 */
-  }
 }
+
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -253,10 +251,8 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_USART2
-                              |RCC_PERIPHCLK_I2C1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_I2C1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK2;
-  PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
   PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_PCLK1;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
