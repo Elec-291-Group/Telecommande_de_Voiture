@@ -19,10 +19,10 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "i2c.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
-#include "i2c.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -60,8 +60,8 @@ static uint16_t u1_len;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-void Set_Car_Speed(int speed);
-
+void Set_Left_Motor(int speed);
+void Set_Right_Motor(int speed);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -108,11 +108,14 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM2_Init();
   MX_ADC_Init();
+  MX_I2C1_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   //starting PWM generation
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-  
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
   
   // Configure ADC channel
   HAL_ADCEx_Calibration_Start(&hadc, ADC_SINGLE_ENDED);
@@ -126,18 +129,14 @@ int main(void)
   char buffer[20];
 
   MX_I2C1_Init();
-  MX_USART2_UART_Init();
+  //MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  /* Configure TIM2 for a 263 µs periodic interrupt used by the IR FSM.
-     T = 10 / 38000 Hz = 263.16 µs.
-     HSI = 16 MHz → PSC = 15 → timer clock = 1 MHz → ARR = 262 → 263 µs. */
-  htim2.Instance->PSC = 15u;
-  htim2.Instance->ARR = 262u;
-  htim2.Instance->EGR = 0x01U;   /* UG: latch new PSC/ARR immediately      */
-  HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(TIM2_IRQn);
+  /* Configure TIM6 for a 263 µs periodic interrupt (IR FSM tick).
+     PSC=15 already set by CubeMX → 1 MHz clock. Override ARR: 262 → 263 µs. */
+  htim6.Instance->ARR = 262u;
+  htim6.Instance->EGR = 0x01U;   /* UG: latch new ARR immediately */
   IR_RX_Init();
-  HAL_TIM_Base_Start_IT(&htim2);
+  HAL_TIM_Base_Start_IT(&htim6);
   printf("IR RX Ready\r\n");
   if (VL53L0X_Init()) {
     printf("VL53L0X OK\r\n");
@@ -156,45 +155,12 @@ int main(void)
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
 
     //test sequence
-    Set_Car_Speed(100); //full speed forward
-    HAL_Delay(2000);
-
-    Set_Car_Speed(0); //stop
-    //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
-    /*
-    if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1)){
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-    }
-    else{
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-    }
-    */
+    Set_Left_Motor(100);  // Left motor full forward
+    Set_Right_Motor(100); // Right motor full forward
 
     adc0 = read_adc_channel(ADC_CHANNEL_1);
     v0 = adc_to_voltage(adc0);
-
-
-    //adc_voltage = adc_value * 3300 / 4095;
-    //sprintf(buffer, "%u\n", (uint32_t)AREFINT_CAL);
-    sprintf(buffer, "%lu\n", v0);
-
-    HAL_UART_Transmit(&huart1, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
-    HAL_Delay(1000);
-
-    /*
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-    HAL_Delay(1000);
-
-    Set_Car_Speed(-50); //half speed backward
-    HAL_Delay(2000);
-
-    Set_Car_Speed(0); //stop
-    HAL_Delay(1000);
    
-    */
     /* Wait for two consecutive valid frames (address 0x0B already verified
        inside the FSM).  Frame 1 = x_byte, frame 2 = y_byte.               */
     if (IR_RX_Available() >= 2) {
@@ -205,6 +171,7 @@ int main(void)
     }
 
     /* ── VL53L0X distance read every 200 ms ─────────────────────────────── */
+    /*
     {
       static uint32_t last_dist_ms;
       if (HAL_GetTick() - last_dist_ms >= 200u) {
@@ -215,39 +182,7 @@ int main(void)
         }
       }
     }
-
-    /* ── BT proxy: forward "B:<payload>\r\n" from UART1 to JDY-23 on UART2,
-       then echo the module's reply back to UART1. ──────────────────────── */
-    {
-      uint8_t ch;
-      if (HAL_UART_Receive(&huart1, &ch, 1u, 1u) == HAL_OK) {
-        if (ch == '\r' || ch == '\n') {
-          if (u1_len > 0u) {
-            u1_line[u1_len] = '\0';
-            if (u1_line[0] == 'B' && u1_line[1] == ':' && u1_len > 2u) {
-              /* Send payload + CRLF to BT module */
-              const uint8_t crlf[2] = {'\r', '\n'};
-              HAL_UART_Transmit(&huart2, u1_line + 2u, u1_len - 2u, HAL_MAX_DELAY);
-              HAL_UART_Transmit(&huart2, (uint8_t *)crlf, 2u, HAL_MAX_DELAY);
-              /* Collect reply: 500 ms for first byte, 50 ms between bytes */
-              uint8_t  reply[256];
-              uint16_t rlen = 0u;
-              while (rlen < sizeof(reply)) {
-                uint32_t tmo = (rlen == 0u) ? 500u : 50u;
-                if (HAL_UART_Receive(&huart2, &reply[rlen], 1u, tmo) != HAL_OK) break;
-                rlen++;
-              }
-              if (rlen > 0u) {
-                HAL_UART_Transmit(&huart1, reply, rlen, HAL_MAX_DELAY);
-              }
-            }
-            u1_len = 0u;
-          }
-        } else if (u1_len < U1_LINE_MAX - 1u) {
-          u1_line[u1_len++] = ch;
-        }
-      }
-    }
+     */
   }
   /* USER CODE END 3 */
 }
@@ -291,10 +226,8 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_USART2
-                              |RCC_PERIPHCLK_I2C1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_I2C1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK2;
-  PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
   PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_PCLK1;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
@@ -303,34 +236,44 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-void Set_Car_Speed(int speed){
-  //speed should be between 0 and 100
-  if(speed > 100) 
-    speed = 100;
-  if(speed < -100) 
-    speed = -100;
-  //STOP
-  if(speed == 0) {
+
+// LEFT MOTOR (TIM2)
+// CH1 (PA15) = Forward Pin | CH2 (PB3) = Reverse Pin
+void Set_Left_Motor(int speed){
+  if(speed > 100) speed = 100;
+  if(speed < -100) speed = -100;
+  
+  if(speed == 0) { // STOP
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
   }
-  //FORWARD
-  else if(speed > 0) {
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-
-    // Multiply by 10 (e.g., 100% * 10 = 1000 ARR)
+  else if(speed > 0) { // FORWARD: CH1 gets PWM, CH2 stays 0
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed * 10); 
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, speed * 10);
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
   }
-  //BACKWARD
-  else{
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-
-    // Multiply by -10 (e.g., -100% * -10 = 1000 ARR)
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, (-speed) * 10); 
+  else { // REVERSE: CH1 stays 0, CH2 gets PWM
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0); 
     __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, (-speed) * 10);
+  }
+}
+
+// RIGHT MOTOR (TIM2)
+// CH3 (PA2) = Forward Pin | CH4 (PA3) = Reverse Pin
+void Set_Right_Motor(int speed){
+  if(speed > 100) speed = 100;
+  if(speed < -100) speed = -100;
+  
+  if(speed == 0) { // STOP
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 0);
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, 0);
+  }
+  else if(speed > 0) { // FORWARD: CH3 gets PWM, CH4 stays 0
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, speed * 10); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, 0);
+  }
+  else { // REVERSE: CH3 stays 0, CH4 gets PWM
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, 0); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, (-speed) * 10);
   }
 }
 
