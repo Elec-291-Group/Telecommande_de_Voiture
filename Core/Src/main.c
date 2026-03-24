@@ -44,10 +44,10 @@
 
 //-------- proportional gain for line tracking control ---------------
 // needed to be tuned !!!
-#define KP 5
-#define KS 5
+#define KP 0.02f
+#define KS 0.015f
 //-------- base power of motor in auto mode -----------------
-#define PB 50
+#define PB 65
 
 /* USER CODE END PD */
 
@@ -155,6 +155,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+    line_tracking();
    
     /* Wait for two consecutive valid frames (address 0x0B already verified
        inside the FSM).  Frame 1 = x_byte, frame 2 = y_byte.               */
@@ -287,16 +289,20 @@ void line_tracking(void){
   adc0 = read_adc_channel(ADC_CHANNEL_0);
   adc1 = read_adc_channel(ADC_CHANNEL_1);
   adc9 = read_adc_channel(ADC_CHANNEL_9);
+
+  // left, right, front and adc mapping depend on wiring
   v_left = adc_to_voltage(adc0);
-  v_right = adc_to_voltage(adc1);
-  v_front = adc_to_voltage(adc9);
+  v_right = adc_to_voltage(adc9);
+  v_front = adc_to_voltage(adc1);
 
   error = (int)v_left - (int)v_right;
   base_power = PB - KS * abs(error);
-
+  //base_power = PB;
   left_power = base_power - KP * error;
   right_power = base_power + KP * error;
 
+  //printf("left: %d; right: %d; front: %d\n", v_left, v_right, v_front);
+  printf("left_power: %d; right_power: %d\n", left_power, right_power);
   Set_Left_Motor(left_power);
   Set_Right_Motor(right_power);
 }
