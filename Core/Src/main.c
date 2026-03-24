@@ -19,15 +19,15 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "dma.h"
+#include "i2c.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
-#include "i2c.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
-#include <stdio.h>
 #include <stdio.h>
 #include "ir_rx.h"
 #include "vl53l0x.h"
@@ -61,12 +61,21 @@
 /* ── BT proxy (UART1 → UART2 → UART1) ──────────────────────────────────── */
 static uint8_t  u1_line[U1_LINE_MAX];
 static uint16_t u1_len;
+uint8_t acceleration_data[6]; //16 bits for each value
+/*accleration values*/
+uint16_t acceleration_xdata; 
+uint16_t acceleration_ydata; 
+uint16_t acceleration_zdata; 
+static const uint8_t init_ctrl1 = 0x40; // 01000000
+static const uint8_t init_ctrl3 = 0x44; // 01000100
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 void Set_Car_Speed(int speed);
+void initializeIMU(void);
+void sampleAcceleration(void);
 
 /* USER CODE END PFP */
 
@@ -131,9 +140,12 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART1_UART_Init();
   MX_TIM2_Init();
   MX_ADC_Init();
+  MX_I2C1_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   //starting PWM generation
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -175,16 +187,6 @@ int main(void)
   char msg[64];
   uint8_t data;
 
-  /*IMU Register Initialization*/
-  uint8_t init_ctrl1 = 0x40; //01000000
-  uint8_t init_ctrl3 = 0x44; //01000100
-
-  /*accleration values*/
-  uint8_t acceleration_data[6]; //16 bits for each value
-  uint16_t acceleration_xdata; 
-  uint16_t acceleration_ydata; 
-  uint16_t acceleration_zdata; 
-
   /*registers writing */
   HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL1_XL, I2C_MEMADD_SIZE_8BIT, &init_ctrl1, 1, 50);
   HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL3_C, I2C_MEMADD_SIZE_8BIT, &init_ctrl3, 1, 50);
@@ -195,6 +197,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
+    initializeIMU();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -202,129 +206,14 @@ int main(void)
 
     //test sequence
     Set_Car_Speed(100); //full speed forward
-    HAL_Delay(2000);
+    sampleAcceleration(); //acceration x, y, z
 
+    HAL_Delay(1000);
     Set_Car_Speed(0); //stop
-    //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
-    /*
-    if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1)){
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-    }
-    else{
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-      HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-    }
-    */
-
-    adc0 = read_adc_channel(ADC_CHANNEL_1);
-    v0 = adc_to_voltage(adc0);
-
-
-    //adc_voltage = adc_value * 3300 / 4095;
-    //sprintf(buffer, "%u\n", (uint32_t)AREFINT_CAL);
-    sprintf(buffer, "%lu\n", v0);
-
-    HAL_UART_Transmit(&huart1, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
-    HAL_Delay(1000);
-
-    /*
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-    HAL_Delay(1000);
-
-    Set_Car_Speed(-50); //half speed backward
-    HAL_Delay(2000);
-
-    Set_Car_Speed(0); //stop
-    HAL_Delay(1000);
-   
-    */
-    /* Wait for two consecutive valid frames (address 0x0B already verified
-       inside the FSM).  Frame 1 = x_byte, frame 2 = y_byte.               */
-    /*
-    if (IR_RX_Available() >= 2) {
-      uint8_t x_byte, y_byte;
-      IR_RX_GetFrame(&x_byte);
-      IR_RX_GetFrame(&y_byte);
-      printf("X=%3u Y=%3u\r\n", x_byte, y_byte);
-    }
-    */
-
-    /* ── VL53L0X distance read every 200 ms ─────────────────────────────── */
-
-    /*
-    {
-      static uint32_t last_dist_ms;
-      if (HAL_GetTick() - last_dist_ms >= 200u) {
-        last_dist_ms = HAL_GetTick();
-        uint16_t dist = VL53L0X_ReadDistance();
-        if (dist != 0xFFFFu) {
-          printf("D=%4u mm\r\n", dist);
-        }
-      }
-    }
-    */
-
-    /* ── BT proxy: forward "B:<payload>\r\n" from UART1 to JDY-23 on UART2,
-       then echo the module's reply back to UART1. ──────────────────────── */
-
-    /*
-    {
-      uint8_t ch;
-      if (HAL_UART_Receive(&huart1, &ch, 1u, 1u) == HAL_OK) {
-        if (ch == '\r' || ch == '\n') {
-          if (u1_len > 0u) {
-            u1_line[u1_len] = '\0';
-            if (u1_line[0] == 'B' && u1_line[1] == ':' && u1_len > 2u) {
-              /* Send payload + CRLF to BT module */ /*
-              const uint8_t crlf[2] = {'\r', '\n'};
-              HAL_UART_Transmit(&huart2, u1_line + 2u, u1_len - 2u, HAL_MAX_DELAY);
-              HAL_UART_Transmit(&huart2, (uint8_t *)crlf, 2u, HAL_MAX_DELAY);
-              /* Collect reply: 500 ms for first byte, 50 ms between bytes 
-              uint8_t  reply[256];
-              uint16_t rlen = 0u;
-              while (rlen < sizeof(reply)) {
-                uint32_t tmo = (rlen == 0u) ? 500u : 50u;
-                if (HAL_UART_Receive(&huart2, &reply[rlen], 1u, tmo) != HAL_OK) break;
-                rlen++;
-              }
-              if (rlen > 0u) {
-                HAL_UART_Transmit(&huart1, reply, rlen, HAL_MAX_DELAY);
-              }
-            }
-            u1_len = 0u;
-          }
-        } else if (u1_len < U1_LINE_MAX - 1u) {
-          u1_line[u1_len++] = ch;
-        }
-      }
-    }
-
-    */
-
-   // HAL_I2C_Mem_Read(&hi2c1, (DEVICE_ADDR  << 1), REG_WHOAMI, I2C_MEMADD_SIZE_8BIT, &data, 1, 50);
-
-    if (HAL_I2C_Mem_Read(&hi2c1, (DEVICE_ADDR << 1), REG_OUTX_L_XL, I2C_MEMADD_SIZE_8BIT, acceleration_data, 6, 1000) == HAL_OK)
-    {
-      acceleration_xdata = (uint16_t)(acceleration_data[1] << 8) | (acceleration_data[0]);
-      acceleration_ydata = (uint16_t)(acceleration_data[3] << 8) | (acceleration_data[2]);
-      acceleration_zdata = (uint16_t)(acceleration_data[5] << 8) | (acceleration_data[4]);
-
-      printf("%02X %02X %02X %02X %02X %02X\r\n",acceleration_data[0], acceleration_data[1], acceleration_data[2], acceleration_data[3], acceleration_data[4], acceleration_data[5]);
-
-      //printf("accel x = 0x%02X\r\n", acceleration_xdata);
-      //printf("accel y = 0x%02X\r\n", acceleration_ydata);
-     // printf("accel z = 0x%02X\r\n", acceleration_zdata);
-
-    } else 
-    {
-        printf("dumbass didnt work\r\n");
-    }
-  }
+    
   /* USER CODE END 3 */
+  }
 }
-
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -407,6 +296,26 @@ void Set_Car_Speed(int speed){
   }
 }
 
+void initializeIMU(void) 
+{
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL1_XL, I2C_MEMADD_SIZE_8BIT, &init_ctrl1, 1, 50);
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL3_C, I2C_MEMADD_SIZE_8BIT, &init_ctrl3, 1, 50);
+}
+
+void sampleAcceleration(void) 
+{
+  if (HAL_I2C_Mem_Read(&hi2c1, (DEVICE_ADDR << 1), REG_OUTX_L_XL, I2C_MEMADD_SIZE_8BIT, acceleration_data, 6, 1000) == HAL_OK)
+  {
+    acceleration_xdata = (uint16_t)(acceleration_data[1] << 8) | (acceleration_data[0]);
+    acceleration_ydata = (uint16_t)(acceleration_data[3] << 8) | (acceleration_data[2]);
+    acceleration_zdata = (uint16_t)(acceleration_data[5] << 8) | (acceleration_data[4]);
+
+    printf("%02X %02X %02X %02X %02X %02X\r\n",acceleration_data[0], acceleration_data[1], acceleration_data[2], acceleration_data[3], acceleration_data[4], acceleration_data[5]);
+  } else 
+  {
+    printf("dumbass didnt work\r\n");
+  }
+}
 /* USER CODE END 4 */
 
 /**
