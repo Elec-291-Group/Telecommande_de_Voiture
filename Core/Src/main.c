@@ -35,7 +35,14 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+#define U1_LINE_MAX  128u
+#define DEVICE_ADDR 0x6B
+#define REG_WHOAMI 0x0F //test for imu data recieve
+#define REG_CTRL1_XL 0x10 //initialize imu for sending accelerometer/gyroscope 
+#define REG_CTRL3_C 0x12 
 
+//acceleration
+#define REG_OUTX_L_XL 0x28
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -62,6 +69,15 @@ volatile uint8_t ir_joystick_y = 128u;
 volatile uint8_t ir_mode       = 0u;     /* 0 = auto, 1 = remote */
 volatile uint8_t ir_running    = 0u;     /* 1 after start, 0 after pause/reset */
 volatile uint8_t ir_path       = 0u;
+
+/* ── IMU Data Collection ─────────────────────────────────────────────────── */
+uint8_t acceleration_data[6]; //16 bits for each value
+/*accleration values*/
+uint16_t acceleration_xdata; 
+uint16_t acceleration_ydata; 
+uint16_t acceleration_zdata; 
+static uint8_t init_ctrl1 = 0x40; // 01000000
+static uint8_t init_ctrl3 = 0x44; // 01000100
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -69,11 +85,21 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 void Set_Left_Motor(int speed);
 void Set_Right_Motor(int speed);
+
+void Set_Car_Speed(int speed);
+void initializeIMU(void);
+void sampleAcceleration(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+/* Route printf → UART1 via the Newlib __io_putchar hook in syscalls.c */
+int __io_putchar(int ch)
+{
+    HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1u, HAL_MAX_DELAY);
+    return ch;
+}
 /* USER CODE END 0 */
 
 /**
@@ -129,26 +155,64 @@ int main(void)
   char buffer[20];
 
   MX_I2C1_Init();
-  //MX_USART2_UART_Init();
+
   /* USER CODE BEGIN 2 */
   /* IR receiver: configures TIM6 as free-running 1 µs counter
      and enables EXTI on PA7 (both edges) for input-capture decoding. */
   IR_RX_Init();
   VL53L0X_Init();
+
+  /* imu WHOAMI test */
+  char msg[64];
+  uint8_t data;
+
+  /*registers writing */
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL1_XL, I2C_MEMADD_SIZE_8BIT, &init_ctrl1, 1, 50);
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL3_C, I2C_MEMADD_SIZE_8BIT, &init_ctrl3, 1, 50);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+  /* LQFP32 PINOUT
+              ----------
+        VDD -|1       32|- VSS
+       PC14 -|2       31|- BOOT0
+       PC15 -|3       30|- PB7
+       NRST -|4       29|- PB6
+       VDDA -|5       28|- PB5
+  (LED) PA0 -|6       27|- PB4
+        PA1 -|7       26|- PB3
+        PA2 -|8       25|- PA15 (PWM output channel 1 of TIM2)
+        PA3 -|9       24|- PA14
+        PA4 -|10      23|- PA13
+        PA5 -|11      22|- PA12
+        PA6 -|12      21|- PA11
+        PA7 -|13      20|- PA10 (Reserved for RXD)
+        PB0 -|14      19|- PA9  (Reserved for TXD)
+        PB1 -|15      18|- PA8
+        VSS -|16      17|- VDD
+              ----------
+  */  
+        initializeIMU();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
     HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_1);
 
+    /* IMU testing code 
+    //test sequence
+    Set_Car_Speed(100); //full speed forward
+    sampleAcceleration(); //acceration x, y, z
+
+    HAL_Delay(1000);
+    Set_Car_Speed(0); //stop
+
     //test sequence
     Set_Left_Motor(100);  // Left motor full forward
     Set_Right_Motor(100); // Right motor full forward
+    */
 
     adc0 = read_adc_channel(ADC_CHANNEL_1);
     v0 = adc_to_voltage(adc0);
@@ -327,6 +391,58 @@ void HandleCommand(uint8_t cmd_name, uint8_t data)
 
     default:
       break;
+  }
+}
+
+void Set_Car_Speed(int speed){
+  //speed should be between 0 and 100
+  if(speed > 100) 
+    speed = 100;
+  if(speed < -100) 
+    speed = -100;
+  //STOP
+  if(speed == 0) {
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
+  }
+  //FORWARD
+  else if(speed > 0) {
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+
+    // Multiply by 10 (e.g., 100% * 10 = 1000 ARR)
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed * 10); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, speed * 10);
+  }
+  //BACKWARD
+  else{
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+
+    // Multiply by -10 (e.g., -100% * -10 = 1000 ARR)
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, (-speed) * 10); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, (-speed) * 10);
+  }
+}
+
+void initializeIMU(void) 
+{
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL1_XL, I2C_MEMADD_SIZE_8BIT, &init_ctrl1, 1, 50);
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL3_C, I2C_MEMADD_SIZE_8BIT, &init_ctrl3, 1, 50);
+}
+
+void sampleAcceleration(void) 
+{
+  if (HAL_I2C_Mem_Read(&hi2c1, (DEVICE_ADDR << 1), REG_OUTX_L_XL, I2C_MEMADD_SIZE_8BIT, acceleration_data, 6, 1000) == HAL_OK)
+  {
+    acceleration_xdata = (uint16_t)(acceleration_data[1] << 8) | (acceleration_data[0]);
+    acceleration_ydata = (uint16_t)(acceleration_data[3] << 8) | (acceleration_data[2]);
+    acceleration_zdata = (uint16_t)(acceleration_data[5] << 8) | (acceleration_data[4]);
+
+    printf("%02X %02X %02X %02X %02X %02X\r\n",acceleration_data[0], acceleration_data[1], acceleration_data[2], acceleration_data[3], acceleration_data[4], acceleration_data[5]);
+  } else 
+  {
+    printf("dumbass didnt work\r\n");
   }
 }
 
