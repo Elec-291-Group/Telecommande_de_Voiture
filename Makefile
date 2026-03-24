@@ -44,11 +44,8 @@ CFLAGS = -I$(INC_DIR) -I$(STD_INC)
 SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.obj,$(SRCS))
 
-# Use cmd.exe explicitly
-SHELL = cmd.exe
-
 # Ensure build directory exists
-$(shell if not exist $(BUILD_DIR) mkdir $(BUILD_DIR))
+$(shell mkdir -p $(BUILD_DIR))
 
 .PHONY: all clean
 
@@ -65,4 +62,4 @@ $(BUILD_DIR)/%.obj: $(SRC_DIR)/%.c
 	$(C51) -c $(CFLAGS) -o $@ $<
 
 clean:
-	if exist $(BUILD_DIR) rmdir /S /Q $(BUILD_DIR)
+	rm -rf $(BUILD_DIR)

@@ -37,7 +37,7 @@ static xdata char    rx0_buf[RX0_SIZE];
 static unsigned char rx0_head = 0;
 static unsigned char rx0_tail = 0;
 
-void UART_init(void)
+void UART0_init(void)
 {
     unsigned char saved_page = SFRPAGE;
     SFRPAGE = UART0_PAGE;
@@ -85,7 +85,7 @@ void UART0_ISR(void) __interrupt(4)
     SFRPAGE = saved_page;
 }
 
-void UART_send_char(char c)
+void UART0_send_char(char c)
 {
     unsigned char saved_page = SFRPAGE;
     SFRPAGE = UART0_PAGE;
@@ -105,21 +105,21 @@ void UART_send_char(char c)
     SFRPAGE = saved_page;
 }
 
-void UART_send_string(const char *s)
+void UART0_send_string(const char *s)
 {
     while (*s)
-        UART_send_char(*s++);
+        UART0_send_char(*s++);
 }
 
-bit UART_available(void)
+bit UART0_available(void)
 {
     return (rx0_head != rx0_tail);
 }
 
-char UART_read(void)
+char UART0_read(void)
 {
     char c;
-    while (!UART_available());
+    while (!UART0_available());
     c        = rx0_buf[rx0_tail];
     rx0_tail = BUF_NEXT(rx0_tail, RX0_MASK);
     return c;

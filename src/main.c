@@ -5,69 +5,93 @@
 #include "bootloader.h"
 #include "timer.h"
 #include "config.h"
+#include "uart.h"
+#include "lcd.h"
 
-// ---- Global state variables ----
-volatile unsigned char ir_state = 1; // variable for ir message. 0 = wave, 1 = constant
-volatile bit last_ir_state = 0;
+void putchar(char c) { UART0_send_char(c); }
 
-void debounce(void){
-	if(P3_0 == 0){
-		waitms(50);
-		if(P3_0 == 0){
-			while(P3_0 == 0);
-			ir_state = !ir_state;
-		}
+void InitPinADC (unsigned char portno, unsigned char pinno)
+{
+	unsigned char mask;
+	
+	mask=1<<pinno;
+
+	SFRPAGE = 0x00;
+	switch (portno)
+	{
+		case 0:
+			P0MDIN &= (~mask); // Set pin as analog input
+			P0SKIP |= mask; // Skip Crossbar decoding for this pin
+		break;
+		case 1:
+			P1MDIN &= (~mask); // Set pin as analog input
+			P1SKIP |= mask; // Skip Crossbar decoding for this pin
+		break;
+		case 2:
+			P2MDIN &= (~mask); // Set pin as analog input
+			P2SKIP |= mask; // Skip Crossbar decoding for this pin
+		break;
+		default:
+		break;
 	}
 }
 
-void switch_ir_mode(void){
-	if(ir_state){
-		// turn OFF IR
-        TR2 = 0;
-        ET2 = 0;
+unsigned int ADC_at_Pin(unsigned char pin)
+{
+	ADC0MX = pin;   // Select input from pin
+	ADINT = 0;
+	ADBUSY = 1;     // Convert voltage at the pin
+	while (!ADINT); // Wait for conversion to complete
+	return (ADC0);
+}
 
-        TR0 = 0;
-        ET0 = 0;
-        P2_1 = 0;
-	}
-	else{
-		// turn ON IR
-        TH0 = (TIMER0_RELOAD >> 8) & 0xFF;
-        TL0 = TIMER0_RELOAD & 0xFF;
-        TF0 = 0;
-        ET0 = 1;
-        TR0 = 1;
+float Volts_at_Pin(unsigned char pin)
+{
+	 return ((ADC_at_Pin(pin)*VDD)/0b_0011_1111_1111_1111);
+}
 
-        TMR2H = (TIMER2_RELOAD >> 8) & 0xFF;
-        TMR2L = TIMER2_RELOAD & 0xFF;
-        TF2H = 0;
-        TF2L = 0;
-        ET2 = 1;
-        TR2 = 1;
-	}
+// Map a voltage (0 to VDD) to a byte (0 to 255)
+unsigned char volt_to_byte(float v)
+{
+	int val = (int)(v / VDD * 255.0f);
+	if (val < 0)   val = 0;
+	if (val > 255) val = 255;
+	return (unsigned char)val;
 }
 
 // ---- Main ----
 void main (){
-	int i = 0;
+	float joystick_x = 0;
+	float joystick_y = 0;
+	unsigned char x_byte, y_byte;
+
 	init_pin_input();
 	TIMER0_Init();
 	TIMER2_Init();
+	UART0_init();
+
+	InitPinADC(1, 4); // Configure Joystick_Y as analog input
+	InitPinADC(1, 5); // Configure Joystick_X as analog input
+	InitADC();
+
 	
+	LCD_4BIT();
+	LCDprint("Hello", 1, 1);
 
-	IR_Send(0); // default: send 0 on startup
-
+	printf("start\r\n");
 	while(1){
-		/*
-		if(ir_state != last_ir_state){
-			IR_Send(ir_state); // send 1 when toggled on, 0 when toggled off
-			last_ir_state = ir_state;
-		}
-			*/
-		waitms(500);
-		
-		for (i=0; i<10; i++) {
-			IR_Send(ir_state);
-		}
+		joystick_x = Volts_at_Pin(JOYSTICK_X);
+		joystick_y = Volts_at_Pin(JOYSTICK_Y);
+
+		x_byte = volt_to_byte(joystick_x);
+		y_byte = volt_to_byte(joystick_y);
+
+		//IR_Send(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
+		//while (fsm_state != FSM_IDLE);
+		waitms(20);
+		IR_Send(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
+		while (fsm_state != FSM_IDLE);
+
+		printf("X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
 	}
 }
