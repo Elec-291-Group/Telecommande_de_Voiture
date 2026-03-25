@@ -65,8 +65,7 @@ void main (){
 	float joystick_x = 0;
 	float joystick_y = 0;
 	unsigned char x_byte, y_byte;
-
-	int debug = 0;
+	lcd_state_t prev_lcd_state = LCD_NUM_STATES;
 
 	init_pin_input();
 	TIMER0_Init();
@@ -77,7 +76,6 @@ void main (){
 	InitPinADC(1, 5); // Configure Joystick_X as analog input
 	InitADC();
 
-	
 	LCD_4BIT();
 	LCD_FSM_init();
 
@@ -89,25 +87,46 @@ void main (){
 		x_byte = volt_to_byte(joystick_x);
 		y_byte = volt_to_byte(joystick_y);
 
-		IR_Send(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
-		while (fsm_state == FSM_IDLE);
-		while (fsm_state != FSM_IDLE);
-
-		IR_Send(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
-		while (fsm_state == FSM_IDLE);
-		while (fsm_state != FSM_IDLE);
-
-		/*
-		IR_Send(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
-		while (fsm_state == FSM_IDLE);
-		while (fsm_state != FSM_IDLE);
-
-		IR_Send(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
-		while (fsm_state == FSM_IDLE);
-		while (fsm_state != FSM_IDLE);
-		*/
-
 		LCD_FSM_update(x_byte, y_byte);
+
+		// On transition into a running state, send mode/path/start
+		if (lcd_state != prev_lcd_state) {
+			if (lcd_state == LCD_S5) {
+				// Auto mode: send mode, path, then start
+				IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+				while (fsm_state == FSM_IDLE);
+				while (fsm_state != FSM_IDLE);
+
+				IR_Send(IR_CMD_PATH, active_path, IR_ADDR);
+				while (fsm_state == FSM_IDLE);
+				while (fsm_state != FSM_IDLE);
+
+				IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+				while (fsm_state == FSM_IDLE);
+				while (fsm_state != FSM_IDLE);
+			} else if (lcd_state == LCD_S6) {
+				// Remote mode: send mode, then start
+				IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+				while (fsm_state == FSM_IDLE);
+				while (fsm_state != FSM_IDLE);
+
+				IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+				while (fsm_state == FSM_IDLE);
+				while (fsm_state != FSM_IDLE);
+			}
+			prev_lcd_state = lcd_state;
+		}
+
+		// Send joystick only in remote mode
+		if (lcd_state == LCD_S6) {
+			IR_Send(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
+			while (fsm_state == FSM_IDLE);
+			while (fsm_state != FSM_IDLE);
+
+			IR_Send(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
+			while (fsm_state == FSM_IDLE);
+			while (fsm_state != FSM_IDLE);
+		}
 
 		printf("X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
 	}
