@@ -7,6 +7,7 @@
 #include "config.h"
 #include "uart.h"
 #include "lcd.h"
+#include "lcd_fsm.h"
 
 void putchar(char c) { UART0_send_char(c); }
 
@@ -76,7 +77,7 @@ void main (){
 
 	
 	LCD_4BIT();
-	LCDprint("Hello", 1, 1);
+	LCD_FSM_init();
 
 	printf("start\r\n");
 	while(1){
@@ -85,6 +86,8 @@ void main (){
 
 		x_byte = volt_to_byte(joystick_x);
 		y_byte = volt_to_byte(joystick_y);
+
+		LCD_FSM_update(x_byte, y_byte);
 
 		//IR_Send(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
 		//while (fsm_state != FSM_IDLE);
