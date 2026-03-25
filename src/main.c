@@ -107,6 +107,8 @@ void main (){
 		while (fsm_state != FSM_IDLE);
 		*/
 
+		LCD_FSM_update(x_byte, y_byte);
+
 		printf("X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
 	}
 }
