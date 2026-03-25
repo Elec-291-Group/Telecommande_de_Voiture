@@ -57,7 +57,7 @@ switch ($Target) {
         Write-Host "[cmake] Building '$ProjectName'..." -ForegroundColor Cyan
         Push-Location $ProjectRoot
         cmake --build build
-        $exitCode = $LASTEXITCODE 
+        $exitCode = $LASTEXITCODE
         Pop-Location
         if ($exitCode -ne 0) { throw "Build failed" }
 
