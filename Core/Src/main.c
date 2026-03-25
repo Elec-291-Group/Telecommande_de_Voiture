@@ -28,6 +28,8 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
+#include <stdlib.h>
 #include "ir_rx.h"
 #include "vl53l0x.h"
 #include "config.h"
@@ -48,6 +50,13 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+//-------- proportional gain for line tracking control ---------------
+// needed to be tuned !!!
+#define KP 0.02f
+#define KS 0.015f
+//-------- base power of motor in auto mode -----------------
+#define PB 65
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -62,6 +71,8 @@
 #define U1_LINE_MAX  128u
 static uint8_t  u1_line[U1_LINE_MAX];
 static uint16_t u1_len;
+
+enum path_tracking_states my_tracking_states = Running;
 
 #define TURN_PRESCALAR 2 // power prescalar to reduce turn speed
 /* ── IR command state (written in ISR via HandleCommand) ─────────────────── */
@@ -86,6 +97,10 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 void Set_Left_Motor(int speed);
 void Set_Right_Motor(int speed);
+void handle_intersection_encountered(void);
+void handle_intersection_turning(void);
+void path_tracking(void);
+void handle_line_tracking(void);
 void motor_remote_control(uint8_t, uint8_t);
 
 void Set_Car_Speed(int speed);
@@ -149,11 +164,13 @@ int main(void)
   HAL_ADCEx_Calibration_Start(&hadc, ADC_SINGLE_ENDED);
   vdda_calibration();
 
-  uint32_t adc0;
-  uint32_t v0;
-
-  /* IR receiver: configures TIM6 as free-running 1 µs counter
-     and enables EXTI on PA7 (both edges) for input-capture decoding. */
+  MX_I2C1_Init();
+  //MX_USART2_UART_Init();
+  /* USER CODE BEGIN 2 */
+  /* Configure TIM6 for a 263 µs periodic interrupt (IR FSM tick).
+     PSC=15 already set by CubeMX → 1 MHz clock. Override ARR: 262 → 263 µs. */
+  htim6.Instance->ARR = 262u;
+  htim6.Instance->EGR = 0x01U;   /* UG: latch new ARR immediately */
   IR_RX_Init();
   VL53L0X_Init();
 
@@ -189,8 +206,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    adc0 = read_adc_channel(ADC_CHANNEL_1);
-    v0 = adc_to_voltage(adc0);
+
+    path_tracking();
    
     /* ── IR FSM timeout watchdog ────────────────────────────────────────── */
     IR_RX_Update();
@@ -306,6 +323,56 @@ void Set_Right_Motor(int speed){
   }
 }
 
+void path_tracking(void){
+  switch(my_tracking_states){
+    case Running:
+      handle_line_tracking();
+      break;
+    
+    case Intersection_encountered:
+      handle_intersection_encountered();
+      break;
+
+    case Intersection_turning:
+      handle_intersection_turning();
+      break;
+      
+  }
+}
+
+void handle_line_tracking(void){
+  uint32_t adc0;
+  uint32_t v_left;
+  uint32_t adc1;
+  uint32_t v_right;
+  uint32_t adc9;
+  uint32_t v_front;
+  int base_power;
+  int error;
+  int left_power;
+  int right_power;
+
+  adc0 = read_adc_channel(ADC_CHANNEL_0);
+  adc1 = read_adc_channel(ADC_CHANNEL_1);
+  adc9 = read_adc_channel(ADC_CHANNEL_9);
+
+  // left, right, front and adc mapping depend on wiring
+  v_left = adc_to_voltage(adc0);
+  v_right = adc_to_voltage(adc9);
+  v_front = adc_to_voltage(adc1);
+
+  error = (int)v_left - (int)v_right;
+  base_power = PB - KS * abs(error);
+  //base_power = PB;
+  left_power = base_power - KP * error;
+  right_power = base_power + KP * error;
+
+  if(v_front > 1000){
+    my_tracking_states = Intersection_encountered;
+  }
+
+  printf("left: %d; right: %d; front: %d\n", v_left, v_right, v_front);
+  //printf("left_power: %d; right_power: %d\n", left_power, right_power);
 void motor_remote_control(uint8_t x, uint8_t y){
   int x_in;
   int y_in;
@@ -345,6 +412,17 @@ void motor_remote_control(uint8_t x, uint8_t y){
   
   Set_Left_Motor(left_power);
   Set_Right_Motor(right_power);
+}
+
+void handle_intersection_encountered(void){
+  Set_Left_Motor(0);
+  Set_Right_Motor(0);
+  my_tracking_states = Intersection_turning;
+}
+
+void handle_intersection_turning(void){
+  Set_Left_Motor(-20); 
+  Set_Right_Motor(20);
 }
 
 /* ── IR command handler — called from ISR context (TIM6 tick) ───────────── */
