@@ -343,8 +343,6 @@ void motor_remote_control(uint8_t x, uint8_t y){
     right_power = x_in - y_in / TURN_PRESCALAR;
   }
   
-
-
   Set_Left_Motor(left_power);
   Set_Right_Motor(right_power);
 }
