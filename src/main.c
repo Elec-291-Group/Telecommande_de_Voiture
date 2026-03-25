@@ -89,9 +89,14 @@ void main (){
 
 		LCD_FSM_update(x_byte, y_byte);
 
-		// On transition into a running state, send mode/path/start
+		// On transition into a running/pause state, send IR command
 		if (lcd_state != prev_lcd_state) {
-			if (lcd_state == LCD_S5) {
+			if (lcd_state == LCD_S7) {
+				// Paused
+				IR_Send(IR_CMD_PAUSE, 0xFF, IR_ADDR);
+				while (fsm_state == FSM_IDLE);
+				while (fsm_state != FSM_IDLE);
+			} else if (lcd_state == LCD_S5) {
 				// Auto mode: send mode, path, then start
 				IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
 				while (fsm_state == FSM_IDLE);
