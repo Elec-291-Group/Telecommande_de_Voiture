@@ -1,30 +1,75 @@
 param(
     [string]$Target    = "build",
-    [string]$Port      = "COM21",   
+    [string]$Port      = "auto",
     [string]$Baud      = "115200",
-    [string]$FlashTool = "C:\Users\Owner\Downloads\STM32L051 (1)\stm32flash\stm32flash.exe"
+    [string]$FlashTool = ""
 )
 
 $ErrorActionPreference = "Stop"
+$IsWindowsOS = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
 
 # --- Project root ---
 $ProjectRoot = $PSScriptRoot
 
-# --- Auto-detect stm32flash ---
-if (-not $FlashTool) {
-    $cmd = Get-Command stm32flash.exe -ErrorAction SilentlyContinue
-    if ($cmd) {
-        $FlashTool = $cmd.Source
-    } else {
+function Get-FlashTool {
+    param(
+        [string]$RequestedTool,
+        [bool]$OnWindows,
+        [string]$Root
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedTool)) {
+        if (Test-Path $RequestedTool) { return $RequestedTool }
+        $cmd = Get-Command $RequestedTool -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+    }
+
+    $cmdCandidates = if ($OnWindows) { @("stm32flash.exe", "stm32flash") } else { @("stm32flash") }
+    foreach ($name in $cmdCandidates) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+    }
+
+    if ($OnWindows) {
         $candidates = @(
             "D:\stm32flash\stm32flash.exe",
             "C:\stm32flash\stm32flash.exe",
-            "$ProjectRoot\stm32flash.exe",
+            "$Root\stm32flash.exe",
             "$env:USERPROFILE\Downloads\stm32flash.exe"
         )
-        $FlashTool = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    } else {
+        $candidates = @(
+            "$Root/stm32flash",
+            "/opt/homebrew/bin/stm32flash",
+            "/usr/local/bin/stm32flash",
+            "/usr/bin/stm32flash"
+        )
     }
+
+    return $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 }
+
+function Get-SerialPorts {
+    param([bool]$OnWindows)
+
+    if ($OnWindows) {
+        return [System.IO.Ports.SerialPort]::GetPortNames() | Sort-Object
+    }
+
+    $patterns = @("/dev/cu.*", "/dev/tty.*", "/dev/ttyUSB*", "/dev/ttyACM*")
+    $ports = @()
+    foreach ($pattern in $patterns) {
+        $ports += Get-ChildItem -Path $pattern -Name -ErrorAction SilentlyContinue
+    }
+
+    if (-not $ports -or $ports.Count -eq 0) {
+        $ports = [System.IO.Ports.SerialPort]::GetPortNames()
+    }
+
+    return $ports | Sort-Object -Unique
+}
+
+$FlashTool = Get-FlashTool -RequestedTool $FlashTool -OnWindows $IsWindowsOS -Root $ProjectRoot
 
 # --- Detect project name ---
 $CmakeLists  = Get-Content "$ProjectRoot\CMakeLists.txt" -Raw
@@ -39,9 +84,11 @@ $BuildDir = "$ProjectRoot\build"
 $ElfFile  = "$BuildDir\$ProjectName.elf"
 $BinFile  = "$BuildDir\$ProjectName.bin"
 
-# --- Fix temp path ---
-$env:TMP  = "$env:USERPROFILE\AppData\Local\Temp"
-$env:TEMP = "$env:USERPROFILE\AppData\Local\Temp"
+# --- Fix temp path (Windows only) ---
+if ($IsWindowsOS) {
+    $env:TMP  = "$env:USERPROFILE\AppData\Local\Temp"
+    $env:TEMP = "$env:USERPROFILE\AppData\Local\Temp"
+}
 
 # --- Targets ---
 switch ($Target) {
@@ -73,11 +120,20 @@ switch ($Target) {
     "flash" {
 
         # --- Port check ---
-        $availablePorts = [System.IO.Ports.SerialPort]::GetPortNames()
+        $availablePorts = Get-SerialPorts -OnWindows $IsWindowsOS
+
+        if ([string]::IsNullOrWhiteSpace($Port) -or $Port -ieq "auto") {
+            if ($availablePorts.Count -eq 0) {
+                Write-Host "[error] No serial ports detected." -ForegroundColor Red
+                exit 1
+            }
+            $Port = $availablePorts[0]
+            Write-Host "[flash] Auto-selected port: $Port" -ForegroundColor Yellow
+        }
 
         if ($Port -notin $availablePorts) {
             Write-Host "[error] Port '$Port' not found." -ForegroundColor Red
-            Write-Host "Available COM ports:" -ForegroundColor Yellow
+            Write-Host "Available serial ports:" -ForegroundColor Yellow
 
             if ($availablePorts.Count -eq 0) {
                 Write-Host "  (none detected)" -ForegroundColor DarkGray
@@ -94,8 +150,8 @@ switch ($Target) {
             throw "$ProjectName.bin not found - run build first"
         }
 
-        if (-not $FlashTool -or -not (Test-Path $FlashTool)) {
-            throw "stm32flash not found. Pass -FlashTool path or install it."
+        if (-not $FlashTool) {
+            throw "stm32flash not found. Install it (e.g. brew install stm32flash) or pass -FlashTool."
         }
 
         Write-Host "[flash] Using: $FlashTool" -ForegroundColor Cyan
