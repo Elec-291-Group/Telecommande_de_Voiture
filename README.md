@@ -6,9 +6,9 @@ Run cmake once to configure the build directory:
 ```bash
 For Ayaan: mkdir build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none-eabi.cmake -G Ninja
 ```
----bash
+```bash
 Rest Guys: mkdir build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none-eabi.cmake
----
+```
 
 ---
 
