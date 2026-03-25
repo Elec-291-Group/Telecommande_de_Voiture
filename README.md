@@ -4,8 +4,10 @@
 
 Run cmake once to configure the build directory:
 ```bash
-Ayaan Use: mkdir build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none-eabi.cmake -G Ninja
-Rest Guys: mkdir build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none-eabi.cmake
+Ayaan: mkdir build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none-eabi.cmake -G Ninja
+```
+```bash
+Other Guys: mkdir build && cd build && cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/gcc-arm-none-eabi.cmake
 ```
 
 ---
@@ -27,3 +29,4 @@ python build.py clean
 
 Before flashing, put the MCU into bootloader mode (same as FPGA 8052 re-boot process):
 1. long push boot0 button and push the reset button
+
