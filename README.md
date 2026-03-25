@@ -1,6 +1,6 @@
-# Build & Flash
+# Build & Flash (all in powershell)
 
-## First-time configure (all in powershell)
+## First-time configure 
 
 Run once to set up the build directory:
 ```powershell
