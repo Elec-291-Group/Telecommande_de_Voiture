@@ -142,33 +142,22 @@ int main(void)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
-  
+
   // Configure ADC channel
   HAL_ADCEx_Calibration_Start(&hadc, ADC_SINGLE_ENDED);
   vdda_calibration();
 
   uint32_t adc0;
   uint32_t v0;
-  uint32_t adc1;
-  uint32_t adc9;
 
-  char buffer[20];
-
-  MX_I2C1_Init();
-
-  /* USER CODE BEGIN 2 */
   /* IR receiver: configures TIM6 as free-running 1 µs counter
      and enables EXTI on PA7 (both edges) for input-capture decoding. */
   IR_RX_Init();
   VL53L0X_Init();
 
-  /* imu WHOAMI test */
-  char msg[64];
-  uint8_t data;
-
-  /*registers writing */
+  /* IMU init */
   HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL1_XL, I2C_MEMADD_SIZE_8BIT, &init_ctrl1, 1, 50);
-  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL3_C, I2C_MEMADD_SIZE_8BIT, &init_ctrl3, 1, 50);
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL3_C,  I2C_MEMADD_SIZE_8BIT, &init_ctrl3, 1, 50);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -194,8 +183,7 @@ int main(void)
         PB1 -|15      18|- PA8
         VSS -|16      17|- VDD
               ----------
-  */  
-        initializeIMU();
+  */
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -220,32 +208,23 @@ int main(void)
     /* ── IR FSM timeout watchdog ────────────────────────────────────────── */
     IR_RX_Update();
 
-    /* ── Print joystick values when updated ─────────────────────────────── */
+    /* ── Drain IR ring buffer ────────────────────────────────────────────── */
     {
-      static uint8_t last_x = 128u, last_y = 128u;
-      uint8_t x = ir_joystick_x, y = ir_joystick_y;
-      if (x != last_x || y != last_y) {
-        last_x = x;
-        last_y = y;
-        printf("X=%3u Y=%3u\r\n", x, y);
+      uint8_t cmd, dat;
+      while (IR_RX_GetFrame(&cmd, &dat)) {
+        printf("RAW cmd=0x%X data=%u\r\n", cmd, dat);  /* DEBUG: remove later */
+        HandleCommand(cmd, dat);
       }
     }
 
+    /* ── Print joystick values every loop ───────────────────────────────── */
+    //printf("X=%3u Y=%3u\r\n", ir_joystick_x, ir_joystick_y);
+
     /* ── VL53L0X distance read every 200 ms ─────────────────────────────── */
-    /*
-    {
-      static uint32_t last_dist_ms;
-      if (HAL_GetTick() - last_dist_ms >= 200u) {
-        last_dist_ms = HAL_GetTick();
-        uint16_t dist = VL53L0X_ReadDistance();
-        if (dist != 0xFFFFu) {
-          printf("D=%4u mm\r\n", dist);
-        }
-      }
-    }
-     */
-  }
+    
   /* USER CODE END 3 */
+  }
+  /* USER CODE END WHILE */
 }
 
 /**
@@ -374,19 +353,10 @@ void HandleCommand(uint8_t cmd_name, uint8_t data)
 
     case IR_CMD_JOYSTICK_X:
       ir_joystick_x = data;
-      if (ir_mode == IR_MODE_REMOTE && ir_running) {
-        /* Map 0-255 → -100..+100: centre 128 → 0 */
-        int spd = ((int)data - 128) * 100 / 128;
-        Set_Left_Motor(spd);
-      }
       break;
 
     case IR_CMD_JOYSTICK_Y:
       ir_joystick_y = data;
-      if (ir_mode == IR_MODE_REMOTE && ir_running) {
-        int spd = ((int)data - 128) * 100 / 128;
-        Set_Right_Motor(spd);
-      }
       break;
 
     default:

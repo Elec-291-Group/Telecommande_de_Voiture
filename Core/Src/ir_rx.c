@@ -49,6 +49,15 @@ static volatile uint16_t   frame;        /* MSB-first shift register            
 static volatile uint8_t    bit_cnt;      /* 0 = ref edge pending, 1-16 = bits   */
 static volatile uint32_t   last_edge_ms; /* HAL_GetTick() at last ISR entry     */
 
+/* ── Ring buffer (ISR writes, main loop reads) ───────────────────────────── */
+#define IR_BUF_SIZE  8u   /* must be a power of 2 */
+
+typedef struct { uint8_t cmd; uint8_t data; } ir_frame_t;
+
+static volatile ir_frame_t ir_buf[IR_BUF_SIZE];
+static volatile uint8_t    ir_head;   /* written by ISR  */
+static volatile uint8_t    ir_tail;   /* read  by main   */
+
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 static inline uint16_t tim6_us(void)
 {
@@ -90,6 +99,20 @@ void IR_RX_Update(void)
             fsm_reset();
         }
     }
+}
+
+int IR_RX_Available(void)
+{
+    return ir_head != ir_tail;
+}
+
+int IR_RX_GetFrame(uint8_t *cmd_out, uint8_t *data_out)
+{
+    if (ir_head == ir_tail) return 0;
+    *cmd_out  = ir_buf[ir_tail].cmd;
+    *data_out = ir_buf[ir_tail].data;
+    ir_tail   = (uint8_t)((ir_tail + 1u) & (IR_BUF_SIZE - 1u));
+    return 1;
 }
 
 /* ── EXTI callback (called by HAL from CubeMX-generated EXTI4_15_IRQHandler) */
@@ -139,6 +162,17 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     case ST_DATA_COLLECT:
         if (pin == GPIO_PIN_RESET) {       /* falling edge only            */
             uint16_t f2f = (uint16_t)(now - t_last_fall);
+
+            /* Timeout: gap > 5 ms means this edge belongs to the next frame,
+               not the stalled current one. Restart FSM using this edge as
+               the new leader falling edge so it is not wasted.            */
+            if (f2f > IR_TIMEOUT_US) {
+                fsm_reset();
+                t_last_fall = now;
+                state = ST_LEADER_CHECK;
+                break;
+            }
+
             t_last_fall  = now;
 
             if (bit_cnt == 0u) {
@@ -158,7 +192,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
                 uint8_t cmd_name = (uint8_t)((frame >> 12) & 0x0Fu);
                 uint8_t data     = (uint8_t)((frame >>  4) & 0xFFu);
                 if (addr == IR_ADDR) {
-                    HandleCommand(cmd_name, data);
+                    /* Push to ring buffer; drop silently if full. */
+                    uint8_t next = (uint8_t)((ir_head + 1u) & (IR_BUF_SIZE - 1u));
+                    if (next != ir_tail) {
+                        ir_buf[ir_head].cmd  = cmd_name;
+                        ir_buf[ir_head].data = data;
+                        ir_head = next;
+                    }
                 }
                 fsm_reset();
             }

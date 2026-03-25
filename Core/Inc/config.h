@@ -37,5 +37,6 @@
 
 /* Timeout: reset FSM if no edge arrives within 5 ms */
 #define IR_TIMEOUT_MS       5u
+#define IR_TIMEOUT_US       5000u    /* same value in µs, for ISR use */
 
 #endif /* CONFIG_H */
