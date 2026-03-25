@@ -32,11 +32,19 @@
 #include <stdlib.h>
 #include "ir_rx.h"
 #include "vl53l0x.h"
+#include "config.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+#define U1_LINE_MAX  128u
+#define DEVICE_ADDR 0x6B
+#define REG_WHOAMI 0x0F //test for imu data recieve
+#define REG_CTRL1_XL 0x10 //initialize imu for sending accelerometer/gyroscope 
+#define REG_CTRL3_C 0x12 
 
+//acceleration
+#define REG_OUTX_L_XL 0x28
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -66,6 +74,22 @@ static uint16_t u1_len;
 
 enum path_tracking_states my_tracking_states = Running;
 
+#define TURN_PRESCALAR 2 // power prescalar to reduce turn speed
+/* ── IR command state (written in ISR via HandleCommand) ─────────────────── */
+volatile uint8_t ir_joystick_x = 128u;   /* centred */
+volatile uint8_t ir_joystick_y = 128u;
+volatile uint8_t ir_mode       = 0u;     /* 0 = auto, 1 = remote */
+volatile uint8_t ir_running    = 0u;     /* 1 after start, 0 after pause/reset */
+volatile uint8_t ir_path       = 0u;
+
+/* ── IMU Data Collection ─────────────────────────────────────────────────── */
+uint8_t acceleration_data[6]; //16 bits for each value
+/*accleration values*/
+uint16_t acceleration_xdata; 
+uint16_t acceleration_ydata; 
+uint16_t acceleration_zdata; 
+static uint8_t init_ctrl1 = 0x40; // 01000000
+static uint8_t init_ctrl3 = 0x44; // 01000100
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -77,6 +101,11 @@ void handle_intersection_encountered(void);
 void handle_intersection_turning(void);
 void path_tracking(void);
 void handle_line_tracking(void);
+void motor_remote_control(uint8_t, uint8_t);
+
+void Set_Car_Speed(int speed);
+void initializeIMU(void);
+void sampleAcceleration(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -88,7 +117,6 @@ int __io_putchar(int ch)
     HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1u, HAL_MAX_DELAY);
     return ch;
 }
-
 /* USER CODE END 0 */
 
 /**
@@ -131,7 +159,7 @@ int main(void)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
-  
+
   // Configure ADC channel
   HAL_ADCEx_Calibration_Start(&hadc, ADC_SINGLE_ENDED);
   vdda_calibration();
@@ -144,49 +172,65 @@ int main(void)
   htim6.Instance->ARR = 262u;
   htim6.Instance->EGR = 0x01U;   /* UG: latch new ARR immediately */
   IR_RX_Init();
-  HAL_TIM_Base_Start_IT(&htim6);
-  printf("IR RX Ready\r\n");
-  if (VL53L0X_Init()) {
-    printf("VL53L0X OK\r\n");
-  } else {
-    printf("VL53L0X FAIL\r\n");
-  }
+  VL53L0X_Init();
+
+  /* IMU init */
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL1_XL, I2C_MEMADD_SIZE_8BIT, &init_ctrl1, 1, 50);
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL3_C,  I2C_MEMADD_SIZE_8BIT, &init_ctrl3, 1, 50);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+  /* LQFP32 PINOUT
+              ----------
+        VDD -|1       32|- VSS
+       PC14 -|2       31|- BOOT0
+       PC15 -|3       30|- PB7
+       NRST -|4       29|- PB6
+       VDDA -|5       28|- PB5
+  (LED) PA0 -|6       27|- PB4
+        PA1 -|7       26|- PB3
+        PA2 -|8       25|- PA15 (PWM output channel 1 of TIM2)
+        PA3 -|9       24|- PA14
+        PA4 -|10      23|- PA13
+        PA5 -|11      22|- PA12
+        PA6 -|12      21|- PA11
+        PA7 -|13      20|- PA10 (Reserved for RXD)
+        PB0 -|14      19|- PA9  (Reserved for TXD)
+        PB1 -|15      18|- PA8
+        VSS -|16      17|- VDD
+              ----------
+  */
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 
     path_tracking();
    
-    /* Wait for two consecutive valid frames (address 0x0B already verified
-       inside the FSM).  Frame 1 = x_byte, frame 2 = y_byte.               */
-    if (IR_RX_Available() >= 2) {
-      uint8_t x_byte, y_byte;
-      IR_RX_GetFrame(&x_byte);
-      IR_RX_GetFrame(&y_byte);
-      printf("X=%3u Y=%3u\r\n", x_byte, y_byte);
-    }
+    /* ── IR FSM timeout watchdog ────────────────────────────────────────── */
+    IR_RX_Update();
 
-    /* ── VL53L0X distance read every 200 ms ─────────────────────────────── */
-    /*
+    /* ── Drain IR ring buffer ────────────────────────────────────────────── */
     {
-      static uint32_t last_dist_ms;
-      if (HAL_GetTick() - last_dist_ms >= 200u) {
-        last_dist_ms = HAL_GetTick();
-        uint16_t dist = VL53L0X_ReadDistance();
-        if (dist != 0xFFFFu) {
-          printf("D=%4u mm\r\n", dist);
-        }
+      uint8_t cmd, dat;
+      while (IR_RX_GetFrame(&cmd, &dat)) {
+        printf("RAW cmd=0x%X data=%u\r\n", cmd, dat);  /* DEBUG: remove later */
+        HandleCommand(cmd, dat);
       }
     }
-     */
-  }
+
+    motor_remote_control(ir_joystick_x, ir_joystick_y);
+
+    /* ── Print joystick values every loop ───────────────────────────────── */
+    //printf("X=%3u Y=%3u\r\n", ir_joystick_x, ir_joystick_y);
+
+    /* ── VL53L0X distance read every 200 ms ─────────────────────────────── */
+    
   /* USER CODE END 3 */
+  }
+  /* USER CODE END WHILE */
 }
 
 /**
@@ -329,6 +373,43 @@ void handle_line_tracking(void){
 
   printf("left: %d; right: %d; front: %d\n", v_left, v_right, v_front);
   //printf("left_power: %d; right_power: %d\n", left_power, right_power);
+void motor_remote_control(uint8_t x, uint8_t y){
+  int x_in;
+  int y_in;
+  int left_power;
+  int right_power;
+  
+  if(x >= 165){
+    x_in = (((int)x - 165) * 100) / 90;
+  }
+  else{
+    x_in = (((int)x - 165) * 100) / 165;
+  }
+  
+  if(y >= 170){
+    y_in = (((int)y - 170) * 100) / 85;
+  }
+  else{
+    y_in = (((int)y - 170) * 100) / 170;
+  }
+  
+  /* Dead zone for joy stick */
+  if(x_in < 20 && x_in > -20){
+    x_in = 0;
+  }
+  if(y_in < 20 && y_in > -20){
+    y_in = 0;
+  }
+
+  if(x_in == 0){
+    left_power = y_in;
+    right_power = -y_in;
+  }
+  else{
+    left_power = x_in + y_in / TURN_PRESCALAR;
+    right_power = x_in - y_in / TURN_PRESCALAR;
+  }
+  
   Set_Left_Motor(left_power);
   Set_Right_Motor(right_power);
 }
@@ -342,6 +423,105 @@ void handle_intersection_encountered(void){
 void handle_intersection_turning(void){
   Set_Left_Motor(-20); 
   Set_Right_Motor(20);
+}
+
+/* ── IR command handler — called from ISR context (TIM6 tick) ───────────── */
+/* Keep this function short: no blocking calls, no printf.                    */
+void HandleCommand(uint8_t cmd_name, uint8_t data)
+{
+  switch (cmd_name)
+  {
+    case IR_CMD_START:
+      ir_running = 1u;
+      break;
+
+    case IR_CMD_PAUSE:
+      ir_running = 0u;
+      Set_Left_Motor(0);
+      Set_Right_Motor(0);
+      break;
+
+    case IR_CMD_RESET:
+      ir_running    = 0u;
+      ir_joystick_x = 128u;
+      ir_joystick_y = 128u;
+      ir_mode       = IR_MODE_AUTO;
+      ir_path       = IR_PATH_1;
+      Set_Left_Motor(0);
+      Set_Right_Motor(0);
+      break;
+
+    case IR_CMD_MODE:
+      ir_mode = data;   /* IR_MODE_AUTO or IR_MODE_REMOTE */
+      break;
+
+    case IR_CMD_PATH:
+      ir_path = data;   /* IR_PATH_1 / IR_PATH_2 / IR_PATH_3 */
+      break;
+
+    case IR_CMD_JOYSTICK_X:
+      ir_joystick_x = data;
+      break;
+
+    case IR_CMD_JOYSTICK_Y:
+      ir_joystick_y = data;
+      break;
+
+    default:
+      break;
+  }
+}
+
+void Set_Car_Speed(int speed){
+  //speed should be between 0 and 100
+  if(speed > 100) 
+    speed = 100;
+  if(speed < -100) 
+    speed = -100;
+  //STOP
+  if(speed == 0) {
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
+  }
+  //FORWARD
+  else if(speed > 0) {
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+
+    // Multiply by 10 (e.g., 100% * 10 = 1000 ARR)
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed * 10); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, speed * 10);
+  }
+  //BACKWARD
+  else{
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+
+    // Multiply by -10 (e.g., -100% * -10 = 1000 ARR)
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, (-speed) * 10); 
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, (-speed) * 10);
+  }
+}
+
+void initializeIMU(void) 
+{
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL1_XL, I2C_MEMADD_SIZE_8BIT, &init_ctrl1, 1, 50);
+  HAL_I2C_Mem_Write(&hi2c1, (DEVICE_ADDR << 1), REG_CTRL3_C, I2C_MEMADD_SIZE_8BIT, &init_ctrl3, 1, 50);
+}
+
+void sampleAcceleration(void) 
+{
+  if (HAL_I2C_Mem_Read(&hi2c1, (DEVICE_ADDR << 1), REG_OUTX_L_XL, I2C_MEMADD_SIZE_8BIT, acceleration_data, 6, 1000) == HAL_OK)
+  {
+    acceleration_xdata = (uint16_t)(acceleration_data[1] << 8) | (acceleration_data[0]);
+    acceleration_ydata = (uint16_t)(acceleration_data[3] << 8) | (acceleration_data[2]);
+    acceleration_zdata = (uint16_t)(acceleration_data[5] << 8) | (acceleration_data[4]);
+
+    printf("%02X %02X %02X %02X %02X %02X\r\n",acceleration_data[0], acceleration_data[1], acceleration_data[2], acceleration_data[3], acceleration_data[4], acceleration_data[5]);
+  } else 
+  {
+    printf("dumbass didnt work\r\n");
+  }
 }
 
 /* USER CODE END 4 */
