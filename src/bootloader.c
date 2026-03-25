@@ -74,7 +74,7 @@ void init_pin_input(void){
 	P3 |= 0b_0000_0001;      // enable internal pull-up
 
 	XBR2 &= ~0x80;
-    XBR2 |= 0x40;
+    XBR2 |= 0x41; // bit6: crossbar enable, bit0: UART1 enable on P0.2(TX)/P0.3(RX)
 }
 
 void InitADC (void)
