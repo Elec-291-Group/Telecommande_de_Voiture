@@ -7,6 +7,7 @@
 #include "config.h"
 #include "uart.h"
 #include "lcd.h"
+#include "lcd_fsm.h"
 
 void putchar(char c) { UART0_send_char(c); }
 
@@ -78,7 +79,7 @@ void main (){
 
 	
 	LCD_4BIT();
-	LCDprint("Hello", 1, 1);
+	LCD_FSM_init();
 
 	printf("start\r\n");
 	while(1){

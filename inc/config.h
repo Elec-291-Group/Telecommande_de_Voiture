@@ -36,6 +36,7 @@
 #define JOYSTICK_Y     QFP32_MUX_P1_4      // P1.4 = ADC0MX channel 12
 #define JoyStick_SW    P2_3
 #define IR_IN          P2_1
+#define PB1            P3_0
 
 
 #endif

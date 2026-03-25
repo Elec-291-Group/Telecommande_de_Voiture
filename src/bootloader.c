@@ -60,7 +60,7 @@ char _c51_external_startup (void)
 	return 0;
 }
 
-// init p2.1 as output (IR LED), p2.3 as input (joystick SW)
+// init p2.1 as output (IR LED), p2.3 as input (joystick SW), p3.0 as input (PB1)
 void init_pin_input(void){
 	P1MDIN = 0b_1100_1111; // P1.4, P1.5 as analog pins
 	P1SKIP |= 0b_1111_1111;
@@ -68,6 +68,10 @@ void init_pin_input(void){
     P2MDIN |= 0b_0000_1010; // P2.1, P2.3 as digital pins
     P2MDOUT |= 0b_0000_0010; // P2.1 as push-pull output; P2.3 stays 0 (open-drain = input)
     P2SKIP |= 0b_0000_0010;
+
+	P3MDIN |= 0b_0000_0001; // P3.0 as digital pin
+	P3MDOUT &= 0b_1111_1110; // P3.0 as input (open-drain)
+	P3 |= 0b_0000_0001;      // enable internal pull-up
 
 	XBR2 &= ~0x80;
     XBR2 |= 0x40;
