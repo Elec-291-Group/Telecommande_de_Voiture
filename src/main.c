@@ -66,6 +66,8 @@ void main (){
 	float joystick_y = 0;
 	unsigned char x_byte, y_byte;
 
+	int debug = 0;
+
 	init_pin_input();
 	TIMER0_Init();
 	TIMER2_Init();
@@ -87,13 +89,23 @@ void main (){
 		x_byte = volt_to_byte(joystick_x);
 		y_byte = volt_to_byte(joystick_y);
 
-		LCD_FSM_update(x_byte, y_byte);
-
-		//IR_Send(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
-		//while (fsm_state != FSM_IDLE);
-		waitms(20);
-		IR_Send(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
+		IR_Send(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
+		while (fsm_state == FSM_IDLE);
 		while (fsm_state != FSM_IDLE);
+
+		IR_Send(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
+		while (fsm_state == FSM_IDLE);
+		while (fsm_state != FSM_IDLE);
+
+		/*
+		IR_Send(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
+		while (fsm_state == FSM_IDLE);
+		while (fsm_state != FSM_IDLE);
+
+		IR_Send(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
+		while (fsm_state == FSM_IDLE);
+		while (fsm_state != FSM_IDLE);
+		*/
 
 		printf("X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
 	}
