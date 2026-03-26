@@ -63,6 +63,9 @@
 #define PB 65
 #define TURN_PRESCALAR 2 // power prescalar to reduce turn speed
 
+//For sensor
+#define VL53L0X_I2C_ADDR 0x52 
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -281,14 +284,44 @@ int main(void)
         HandleCommand(cmd, dat);
       }
     }
+    /* ── VL53L0X Distance Read & Collision Override ─────────────────────── */
+    static uint32_t last_dist_ms = 0;
+    static uint16_t current_distance = 8190; // Default to max range
 
-    path_tracking();
+    if (HAL_GetTick() - last_dist_ms >= 100u) {
+      last_dist_ms = HAL_GetTick();
+      
+      uint16_t reading = VL53L0X_ReadDistance();
+      if (reading != 0xFFFFu) { // 0xFFFF means error or sensor not ready
+          current_distance = reading;
+      } else {
+          current_distance = 8190; // Default to max range on error i think
+      }
+    }
+
+    /* 3. COLLISION DETECTION OVERRIDE */
+    if (current_distance < 100) { 
+      // EMERGENCY STOP: If bject is closer than 10cm
+      Set_Left_Motor(0);
+      Set_Right_Motor(0);
+      printf("OBSTACLE DETECTED! STOPPING.\r\n");
+    } 
+    else {
+      // PATH CLEAR: Run normal driving modes based on IR command
+      if (ir_mode == 0u) { // 0 = Auto Mode
+        path_tracking();
+      } else {             // 1 = Remote Mode
+        motor_remote_control(ir_joystick_x, ir_joystick_y);
+      }
+    }
+
+  /* USER CODE END 3 */
+
     //motor_remote_control(ir_joystick_x, ir_joystick_y);
 
     /* ── Print joystick values every loop ───────────────────────────────── */
     //printf("X=%3u Y=%3u\r\n", ir_joystick_x, ir_joystick_y);
 
-    /* ── VL53L0X distance read every 200 ms ─────────────────────────────── */
     
   /* USER CODE END 3 */
   static uint32_t last_imu_print = 0;
