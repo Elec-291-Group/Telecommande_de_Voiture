@@ -75,6 +75,13 @@ enum path_tracking_states {
   Intersection_encountered,
   Intersection_turning,
 };
+
+enum intersection_directions {
+  Forward,
+  Left,
+  Right,
+};
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

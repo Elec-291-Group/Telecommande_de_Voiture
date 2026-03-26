@@ -59,6 +59,7 @@
 // needed to be tuned !!!
 #define KP 0.02f
 #define KS 0.015f
+#define KF 0.025f // decrease speed before approaching the intersection
 //-------- base power of motor in auto mode -----------------
 #define PB 65
 #define TURN_PRESCALAR 2 // power prescalar to reduce turn speed
@@ -282,8 +283,8 @@ int main(void)
       }
     }
 
-    //path_tracking();
-    motor_remote_control(ir_joystick_x, ir_joystick_y);
+    path_tracking();
+    //motor_remote_control(ir_joystick_x, ir_joystick_y);
 
     /* ── Print joystick values every loop ───────────────────────────────── */
     //printf("X=%3u Y=%3u\r\n", ir_joystick_x, ir_joystick_y);
@@ -434,6 +435,11 @@ void handle_line_tracking(void){
 
   error = (int)v_left - (int)v_right;
   base_power = PB - KS * abs(error);
+  
+  if(v_front > 700){
+    base_power = max(base_power - KF * v_front, 45);
+  }
+
   //base_power = PB;
   left_power = base_power - KP * error;
   right_power = base_power + KP * error;
@@ -458,8 +464,8 @@ void handle_intersection_encountered(void){
 }
 
 void handle_intersection_turning(void){
-  Set_Left_Motor(-50); 
-  Set_Right_Motor(50);
+  Set_Left_Motor(-45); 
+  Set_Right_Motor(45);
   printf("intersection encountered, turning!\n");
   printf("left: %d; right: %d; front: %d\n", v_left, v_right, v_front);
   my_tracking_states = Intersection_turning;  
@@ -504,17 +510,6 @@ void motor_remote_control(uint8_t x, uint8_t y){
   
   Set_Left_Motor(left_power);
   Set_Right_Motor(right_power);
-}
-
-void handle_intersection_encountered(void){
-  Set_Left_Motor(0);
-  Set_Right_Motor(0);
-  my_tracking_states = Intersection_turning;
-}
-
-void handle_intersection_turning(void){
-  Set_Left_Motor(-20); 
-  Set_Right_Motor(20);
 }
 
 /* ── IR command handler — called from ISR context (TIM6 tick) ───────────── */
