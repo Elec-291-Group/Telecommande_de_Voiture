@@ -4,6 +4,7 @@
 #include <string.h>
 #include "bootloader.h"
 #include "timer.h"
+#include "ir_tx.h"
 #include "config.h"
 #include "uart.h"
 #include "lcd.h"

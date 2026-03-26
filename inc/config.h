@@ -29,13 +29,14 @@
 #define IR_CMD_JOYSTICK_X 0x5   // data = joystick_x byte
 #define IR_CMD_JOYSTICK_Y 0x6   // data = joystick_y byte
 
-#define IR_ADDR           0xB   // device address nibble
+#define IR_ADDR1           0xB   // device address nibble
+#define IR_ADDR2           0x7   // device address nibble
 
 #define CHARS_PER_LINE 16
 #define JOYSTICK_X     QFP32_MUX_P1_5      // P1.5 = ADC0MX channel 13
 #define JOYSTICK_Y     QFP32_MUX_P1_4      // P1.4 = ADC0MX channel 12
 #define JoyStick_SW    P2_3
-#define IR_IN          P2_1
+#define IR_IN          P0_7
 #define PB1            P3_0
 
 
