@@ -72,6 +72,7 @@ void main (){
 	TIMER0_Init();
 	TIMER2_Init();
 	UART0_init();
+	UART1_init();
 
 	InitPinADC(1, 4); // Configure Joystick_Y as analog input
 	InitPinADC(1, 5); // Configure Joystick_X as analog input
@@ -134,6 +135,14 @@ void main (){
 			while (fsm_state != FSM_IDLE);
 		}
 
+		// UART0: debug
 		printf("X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
+
+		// UART1: data to PC via FT230XS
+		{
+			char buf[17];
+			sprintf(buf, "X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
+			UART1_send_string(buf);
+		}
 	}
 }
