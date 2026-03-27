@@ -96,6 +96,18 @@ void main (){
 	LCD_FSM_init();
 
 	printf("start\r\n");
+	{
+		unsigned int ble_counter = 0;
+		char ble_buf[24];
+		while(1){
+			sprintf(ble_buf, "test:%u\r\n", ble_counter++);
+			UART1_send_string(ble_buf);
+			// Echo anything received on UART1 back
+			while (UART1_available())
+				UART1_send_char(UART1_read());
+			waitms(500);
+		}
+	}
 	while(1){
 		IR_debug();
 		/*
@@ -115,27 +127,41 @@ void main (){
 				while (fsm_state == FSM_IDLE);
 				while (fsm_state != FSM_IDLE);
 			} else if (lcd_state == LCD_S5) {
-				// Auto mode: send mode, path, then start
-				IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+				if (prev_lcd_state == LCD_S7) {
+					// Resume from pause
+					IR_Send(IR_CMD_RESUME, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				} else {
+					// Fresh start: send mode, path, then start
+					IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
 
-				IR_Send(IR_CMD_PATH, active_path, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+					IR_Send(IR_CMD_PATH, active_path, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
 
-				IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+					IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				}
 			} else if (lcd_state == LCD_S6) {
-				// Remote mode: send mode, then start
-				IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+				if (prev_lcd_state == LCD_S7) {
+					// Resume from pause
+					IR_Send(IR_CMD_RESUME, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				} else {
+					// Fresh start: send mode, then start
+					IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
 
-				IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+					IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				}
 			}
 			prev_lcd_state = lcd_state;
 		}
