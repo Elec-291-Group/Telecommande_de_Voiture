@@ -13,17 +13,79 @@
 
 void putchar(char c) { UART0_send_char(c); }
 
-// ---- IR loopback debug --------------------------------------------------
-static void IR_debug(void)
+static bit bluetooth_stream_enabled = 0;
+
+static void Bluetooth_handle_commands(void)
+{
+    static char cmd_buf[24];
+    static unsigned char cmd_len = 0;
+
+    while (UART1_available())
+    {
+        char c = UART1_read();
+
+        if (c == '\r')
+            continue;
+
+        if (c == '\n')
+        {
+            cmd_buf[cmd_len] = '\0';
+
+            if (strcmp(cmd_buf, "STREAM_ON") == 0)
+            {
+                bluetooth_stream_enabled = 1;
+                UART1_send_string("OK,STREAM_ON\r\n");
+            }
+            else if (strcmp(cmd_buf, "STREAM_OFF") == 0)
+            {
+                bluetooth_stream_enabled = 0;
+                UART1_send_string("OK,STREAM_OFF\r\n");
+            }
+            else if (strcmp(cmd_buf, "STATUS") == 0)
+            {
+                UART1_send_string(bluetooth_stream_enabled ? "STATUS,STREAM_ON\r\n"
+                                                           : "STATUS,STREAM_OFF\r\n");
+            }
+            else if (cmd_len > 0)
+            {
+                UART1_send_string("ERR,UNKNOWN_CMD\r\n");
+            }
+
+            cmd_len = 0;
+            continue;
+        }
+
+        if (cmd_len < (sizeof(cmd_buf) - 1))
+            cmd_buf[cmd_len++] = c;
+        else
+            cmd_len = 0;
+    }
+}
+
+static void IR_forward_imu_to_bluetooth(void)
 {
     IR_Frame_t f;
-    //send_ir_packet((uint8_t)IR_CMD_START, (uint16_t)0x0000, (uint8_t)IR_ADDR1);
+    char ble_buf[40];
+
     while (IR_RX_get(&f))
-        if (f.addr == IR_ADDR2)
-            printf("cmd=%u val=0x%04X addr=0x%X\r\n",
-                   (unsigned int)f.cmd,
-                   (unsigned int)f.val,
-                   (unsigned int)f.addr);
+    {
+        if (f.addr != IR_ADDR2)
+            continue;
+
+        printf("cmd=%u val=0x%04X addr=0x%X\r\n",
+               (unsigned int)f.cmd,
+               (unsigned int)f.val,
+               (unsigned int)f.addr);
+
+        if (bluetooth_stream_enabled &&
+            f.cmd >= IMU_CMD_BASE && f.cmd < IMU_CMD_BASE + IMU_REG_COUNT)
+        {
+            sprintf(ble_buf, "imu,%u,%u\r\n",
+                    (unsigned int)(f.cmd - IMU_CMD_BASE),
+                    (unsigned int)f.val);
+            UART1_send_string(ble_buf);
+        }
+    }
 }
 
 void InitPinADC (unsigned char portno, unsigned char pinno)
@@ -97,20 +159,9 @@ void main (){
 	LCD_FSM_init();
 
 	printf("start\r\n");
-	{
-		unsigned int ble_counter = 0;
-		char ble_buf[24];
-		while(1){
-			sprintf(ble_buf, "test:%u\r\n", ble_counter++);
-			UART1_send_string(ble_buf);
-			// Echo anything received on UART1 back
-			while (UART1_available())
-				UART1_send_char(UART1_read());
-			waitms(500);
-		}
-	}
 	while(1){
-		IR_debug();
+		Bluetooth_handle_commands();
+		IR_forward_imu_to_bluetooth();
 		/*
 		joystick_x = Volts_at_Pin(JOYSTICK_X);
 		joystick_y = Volts_at_Pin(JOYSTICK_Y);
