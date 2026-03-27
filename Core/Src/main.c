@@ -206,7 +206,7 @@ void uart_send_pose(void);
 void uart_send_origin(void);
 void UART_StartRxIT(void);
 void UART_ProcessRx(void);
-//void process_uart_command(char *line);
+// void process_uart_command(char *line);
 void process_pathfinder_control(float dt_s);
 void sample_guidewire_sensors(void);
 void update_guidewire_origin_reference(void);
