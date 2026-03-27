@@ -2,7 +2,7 @@
  * uart.c – Interrupt-driven ring-buffer UART driver for EFM8LB12F64G
  *
  * UART0 : P0.4 TX / P0.5 RX  – SFR page 0x00, baud via Timer 1
- * UART1 : P3.0 TX / P3.1 RX  – SFR page 0x20, baud via dedicated BRG
+ * UART1 : P0.2 TX / P0.3 RX  – SFR page 0x20, baud via dedicated BRG
  *
  * Both channels: BAUDRATE baud (see config.h).
  *
