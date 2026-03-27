@@ -61,6 +61,8 @@ void Error_Handler(void);
 #define right_motor_hbridge1_GPIO_Port GPIOA
 #define right_motor_hbridge2_Pin GPIO_PIN_3
 #define right_motor_hbridge2_GPIO_Port GPIOA
+#define IR_Transmit_Pin GPIO_PIN_6
+#define IR_Transmit_GPIO_Port GPIOA
 #define IR_Receiver_Pin GPIO_PIN_7
 #define IR_Receiver_GPIO_Port GPIOA
 #define IR_Receiver_EXTI_IRQn EXTI4_15_IRQn
@@ -68,11 +70,13 @@ void Error_Handler(void);
 #define left_motor_hbridge1_GPIO_Port GPIOA
 #define left_motor_hbridge2_Pin GPIO_PIN_3
 #define left_motor_hbridge2_GPIO_Port GPIOB
-#define IR_Transmit_Pin GPIO_PIN_6
-#define IR_Transmit_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
-
+enum path_tracking_states {
+  Running,
+  Intersection_encountered,
+  Intersection_turning,
+};
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
