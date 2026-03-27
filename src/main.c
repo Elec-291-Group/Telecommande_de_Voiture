@@ -19,10 +19,11 @@ static void IR_debug(void)
     IR_Frame_t f;
     //send_ir_packet((uint8_t)IR_CMD_START, (uint16_t)0x0000, (uint8_t)IR_ADDR1);
     while (IR_RX_get(&f))
-        printf("cmd=%u val=0x%04X addr=0x%X\r\n",
-               (unsigned int)f.cmd,
-               (unsigned int)f.val,
-               (unsigned int)f.addr);
+        if (f.addr == IR_ADDR2)
+            printf("cmd=%u val=0x%04X addr=0x%X\r\n",
+                   (unsigned int)f.cmd,
+                   (unsigned int)f.val,
+                   (unsigned int)f.addr);
 }
 
 void InitPinADC (unsigned char portno, unsigned char pinno)

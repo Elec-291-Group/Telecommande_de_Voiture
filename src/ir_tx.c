@@ -12,7 +12,7 @@ static volatile bit fsm_trigger = 0;
 static unsigned char xdata sirc_units[SIRC_MAX_UNITS];
 static unsigned char sirc_unit_count = 0;   // filled by PrepareFrame()
 static unsigned char sirc_unit_idx   = 0;   // current position in ISR
-static unsigned char sirc_tick_count = 0;   // ticks elapsed this frame
+static unsigned int  sirc_tick_count = 0;   // ticks elapsed this frame
 
 // ---- Carrier helpers ------------------------------------------------
 
@@ -32,91 +32,16 @@ static void disable_carrier(void)
 	P2_1 = 0;
 }
 
-// ---- PrepareFrame ---------------------------------------------------
-// Frame layout (pulse-distance encoding, MSB first):
-//
-//   Start   : [1,1,1,1,0,0]  4T burst + 2T space
-//   Bit "0" : [1,0,0]        1T burst + 2T space
-//   Bit "1" : [1,0,0,0]      1T burst + 3T space
-//   Fields  : 4-bit cmd_name | 8-bit payload | 4-bit address
-//   Stop    : [1]            1T carrier burst, then carrier off
-
-// Append one encoded bit (MSB-first caller passes the bit value directly)
+// ---- Append one encoded bit (pulse-distance, MSB-first) -------------
+// Bit "0" : [1,0,0]    1T burst + 2T space  (3T period)
+// Bit "1" : [1,0,0,0]  1T burst + 3T space  (4T period)
 static void append_bit(unsigned char val)
 {
 	sirc_units[sirc_unit_count++] = 1;   // 1T burst (always)
-	sirc_units[sirc_unit_count++] = 0;   // 2T space start
+	sirc_units[sirc_unit_count++] = 0;   // 2T space
 	sirc_units[sirc_unit_count++] = 0;
 	if (val)
-		sirc_units[sirc_unit_count++] = 0; // extra 1T space for "1"
-}
-
-void PrepareFrame(unsigned char cmd_name, unsigned char payload, unsigned char address)
-{
-	unsigned char i;
-	sirc_unit_count = 0;
-
-	// Start sign: 4T burst + 2T space
-	sirc_units[sirc_unit_count++] = 1;
-	sirc_units[sirc_unit_count++] = 1;
-	sirc_units[sirc_unit_count++] = 1;
-	sirc_units[sirc_unit_count++] = 1;
-	sirc_units[sirc_unit_count++] = 0;
-	sirc_units[sirc_unit_count++] = 0;
-
-	// Command name (4 bits), MSB first
-	i = 4;
-	do { i--; append_bit((cmd_name >> i) & 1); } while (i > 0);
-
-	// Payload (8 bits), MSB first
-	i = 8;
-	do { i--; append_bit((payload >> i) & 1); } while (i > 0);
-
-	// Address (4 bits), MSB first
-	i = 4;
-	do { i--; append_bit((address >> i) & 1); } while (i > 0);
-
-	// Stop sign: 1T carrier burst, then idle (carrier off enforced by FSM)
-	sirc_units[sirc_unit_count++] = 1;
-}
-
-// ---- Public API -----------------------------------------------------
-
-void IR_Send(unsigned char cmd_name, unsigned char payload, unsigned char address)
-{
-	PrepareFrame(cmd_name, payload, address);
-	fsm_trigger = 1;
-}
-
-void IR_Send_IMU(unsigned char reg, unsigned int val, unsigned char address)
-{
-	unsigned char i;
-	sirc_unit_count = 0;
-
-	// Start sign: 4T burst + 2T space
-	sirc_units[sirc_unit_count++] = 1;
-	sirc_units[sirc_unit_count++] = 1;
-	sirc_units[sirc_unit_count++] = 1;
-	sirc_units[sirc_unit_count++] = 1;
-	sirc_units[sirc_unit_count++] = 0;
-	sirc_units[sirc_unit_count++] = 0;
-
-	// 5-bit register label, MSB first
-	i = 5;
-	do { i--; append_bit((reg >> i) & 1); } while (i > 0);
-
-	// 16-bit register value, MSB first
-	i = 16;
-	do { i--; append_bit((val >> i) & 1); } while (i > 0);
-
-	// 4-bit address, MSB first
-	i = 4;
-	do { i--; append_bit((address >> i) & 1); } while (i > 0);
-
-	// Stop sign: 1T carrier burst
-	sirc_units[sirc_unit_count++] = 1;
-
-	fsm_trigger = 1;
+		sirc_units[sirc_unit_count++] = 0; // extra 1T space for bit "1"
 }
 
 void send_ir_packet(uint8_t cmd, uint16_t val, uint8_t addr)
