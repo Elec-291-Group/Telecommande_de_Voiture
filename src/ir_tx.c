@@ -8,7 +8,7 @@ volatile unsigned char fsm_state = FSM_IDLE;
 // Trigger flag set by IR_Send(), cleared in ISR
 static volatile bit fsm_trigger = 0;
 
-// SIRC unit buffer in XDATA (71 bytes, too large for internal DATA RAM)
+// SIRC unit buffer in XDATA (119 bytes worst-case for 28-bit IMU frame)
 static unsigned char xdata sirc_units[SIRC_MAX_UNITS];
 static unsigned char sirc_unit_count = 0;   // filled by PrepareFrame()
 static unsigned char sirc_unit_idx   = 0;   // current position in ISR
@@ -86,6 +86,71 @@ void IR_Send(unsigned char cmd_name, unsigned char payload, unsigned char addres
 {
 	PrepareFrame(cmd_name, payload, address);
 	fsm_trigger = 1;
+}
+
+void IR_Send_IMU(unsigned char reg, unsigned int val, unsigned char address)
+{
+	unsigned char i;
+	sirc_unit_count = 0;
+
+	// Start sign: 4T burst + 2T space
+	sirc_units[sirc_unit_count++] = 1;
+	sirc_units[sirc_unit_count++] = 1;
+	sirc_units[sirc_unit_count++] = 1;
+	sirc_units[sirc_unit_count++] = 1;
+	sirc_units[sirc_unit_count++] = 0;
+	sirc_units[sirc_unit_count++] = 0;
+
+	// 5-bit register label, MSB first
+	i = 5;
+	do { i--; append_bit((reg >> i) & 1); } while (i > 0);
+
+	// 16-bit register value, MSB first
+	i = 16;
+	do { i--; append_bit((val >> i) & 1); } while (i > 0);
+
+	// 4-bit address, MSB first
+	i = 4;
+	do { i--; append_bit((address >> i) & 1); } while (i > 0);
+
+	// Stop sign: 1T carrier burst
+	sirc_units[sirc_unit_count++] = 1;
+
+	fsm_trigger = 1;
+}
+
+void send_ir_packet(uint8_t cmd, uint16_t val, uint8_t addr)
+{
+	uint8_t i;
+
+	if (fsm_state != FSM_IDLE) return;   /* drop if previous frame still sending */
+
+	sirc_unit_count = 0;
+
+	/* Start sign: 4T burst + 2T space --------------------------------- */
+	sirc_units[sirc_unit_count++] = 1;
+	sirc_units[sirc_unit_count++] = 1;
+	sirc_units[sirc_unit_count++] = 1;
+	sirc_units[sirc_unit_count++] = 1;
+	sirc_units[sirc_unit_count++] = 0;
+	sirc_units[sirc_unit_count++] = 0;
+
+	/* 8-bit command label, MSB first ----------------------------------- */
+	i = 8;
+	do { i--; append_bit((cmd >> i) & 1); } while (i > 0);
+
+	/* 16-bit register value, MSB first --------------------------------- */
+	i = 16;
+	do { i--; append_bit((val >> i) & 1); } while (i > 0);
+
+	/* 4-bit address, MSB first ----------------------------------------- */
+	i = 4;
+	do { i--; append_bit((addr >> i) & 1); } while (i > 0);
+
+	/* Stop sign: 1T burst ---------------------------------------------- */
+	sirc_units[sirc_unit_count++] = 1;
+
+	fsm_trigger = 1;   /* ISR picks this up on the next Timer 2 tick */
 }
 
 // ---- Timer 0 — 38 kHz carrier ---------------------------------------

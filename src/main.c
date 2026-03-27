@@ -5,12 +5,25 @@
 #include "bootloader.h"
 #include "timer.h"
 #include "ir_tx.h"
+#include "ir_rx.h"
 #include "config.h"
 #include "uart.h"
 #include "lcd.h"
 #include "lcd_fsm.h"
 
 void putchar(char c) { UART0_send_char(c); }
+
+// ---- IR loopback debug --------------------------------------------------
+static void IR_debug(void)
+{
+    IR_Frame_t f;
+    //send_ir_packet((uint8_t)IR_CMD_START, (uint16_t)0x0000, (uint8_t)IR_ADDR1);
+    while (IR_RX_get(&f))
+        printf("cmd=%u val=0x%04X addr=0x%X\r\n",
+               (unsigned int)f.cmd,
+               (unsigned int)f.val,
+               (unsigned int)f.addr);
+}
 
 void InitPinADC (unsigned char portno, unsigned char pinno)
 {
@@ -73,6 +86,7 @@ void main (){
 	TIMER2_Init();
 	UART0_init();
 	UART1_init();
+	IR_RX_init();
 
 	InitPinADC(1, 4); // Configure Joystick_Y as analog input
 	InitPinADC(1, 5); // Configure Joystick_X as analog input
@@ -83,6 +97,8 @@ void main (){
 
 	printf("start\r\n");
 	while(1){
+		IR_debug();
+		/*
 		joystick_x = Volts_at_Pin(JOYSTICK_X);
 		joystick_y = Volts_at_Pin(JOYSTICK_Y);
 
@@ -134,15 +150,7 @@ void main (){
 			while (fsm_state == FSM_IDLE);
 			while (fsm_state != FSM_IDLE);
 		}
-
-		// UART0: debug
-		printf("X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
-
-		// UART1: data to PC via FT230XS
-		{
-			char buf[17];
-			sprintf(buf, "X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
-			UART1_send_string(buf);
-		}
+			*/
+		
 	}
 }
