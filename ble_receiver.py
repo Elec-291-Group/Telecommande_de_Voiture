@@ -33,11 +33,12 @@ async def main():
 
         print(f"\nSubscribing to {notify_uuid}...")
         await client.start_notify(notify_uuid, handle_data)
-        print("Waiting 2s then writing test message to JDY-23...\n")
-        await asyncio.sleep(2)
-        await client.write_gatt_char(write_uuid, b"hello\r\n")
-        print("Wrote 'hello' to JDY-23. Waiting for echo...\n")
-        await asyncio.sleep(10)
+        print("Receiving data... Press Ctrl+C to stop.\n")
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            pass
         await client.stop_notify(notify_uuid)
 
 asyncio.run(main())

@@ -77,10 +77,11 @@ unsigned char volt_to_byte(float v)
 
 // ---- Main ----
 void main (){
-	float joystick_x = 0;
-	float joystick_y = 0;
+	static xdata float joystick_x;
+	static xdata float joystick_y;
 	unsigned char x_byte, y_byte;
 	lcd_state_t prev_lcd_state = LCD_NUM_STATES;
+	static xdata char ble_buf[17];
 
 	init_pin_input();
 	TIMER0_Init();
@@ -97,21 +98,9 @@ void main (){
 	LCD_FSM_init();
 
 	printf("start\r\n");
-	{
-		unsigned int ble_counter = 0;
-		char ble_buf[24];
-		while(1){
-			sprintf(ble_buf, "test:%u\r\n", ble_counter++);
-			UART1_send_string(ble_buf);
-			// Echo anything received on UART1 back
-			while (UART1_available())
-				UART1_send_char(UART1_read());
-			waitms(500);
-		}
-	}
 	while(1){
 		IR_debug();
-		/*
+
 		joystick_x = Volts_at_Pin(JOYSTICK_X);
 		joystick_y = Volts_at_Pin(JOYSTICK_Y);
 
@@ -163,6 +152,22 @@ void main (){
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 				}
+			} else if (lcd_state == LCD_S9) {
+				if (prev_lcd_state == LCD_S7) {
+					// Resume from pause
+					IR_Send(IR_CMD_RESUME, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				} else {
+					// Fresh start: send mode, then start
+					IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+
+					IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				}
 			}
 			prev_lcd_state = lcd_state;
 		}
@@ -177,7 +182,9 @@ void main (){
 			while (fsm_state == FSM_IDLE);
 			while (fsm_state != FSM_IDLE);
 		}
-			*/
-		
+
+		// Send joystick data over BLE (UART1 → JDY-23)
+		sprintf(ble_buf, "X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
+		UART1_send_string(ble_buf);
 	}
 }

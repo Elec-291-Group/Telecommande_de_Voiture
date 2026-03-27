@@ -3,13 +3,15 @@
 
 typedef enum {
     LCD_S0 = 0,  // Welcome
-    LCD_S1,      // Choose Mode (Auto/Remote)
+    LCD_S1,      // Choose Mode (Auto/Remote/Pathfind)
     LCD_S2,      // Choose Path (Auto only)
     LCD_S3,      // Ready (Auto)
     LCD_S4,      // Ready (Remote)
     LCD_S5,      // Running (Auto)
     LCD_S6,      // Running (Remote)
     LCD_S7,      // Pause
+    LCD_S8,      // Ready (Pathfind)
+    LCD_S9,      // Running (Pathfind)
     LCD_NUM_STATES
 } lcd_state_t;
 

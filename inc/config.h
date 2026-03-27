@@ -29,10 +29,11 @@
 #define IR_CMD_START      0   // val = 0x0000
 #define IR_CMD_PAUSE      1   // val = 0x0000
 #define IR_CMD_RESET      2   // val = 0x0000
-#define IR_CMD_MODE       3   // val: 0x0000=auto, 0x0001=remote
+#define IR_CMD_MODE       3   // val: 0x0000=auto, 0x0001=remote, 0x0002=pathfind
 #define IR_CMD_PATH       4   // val: 0x0001=path1, 0x0002=path2, 0x0003=path3
 #define IR_CMD_JOYSTICK_X 5   // val = joystick_x byte
 #define IR_CMD_JOYSTICK_Y 6   // val = joystick_y byte
+#define IR_CMD_RESUME     7   // val = 0x0000 — resume from pause
 
 // ---- IMU register array indices (0-17 → imu_regs[]) ----
 // Command byte sent over IR = IMU_CMD_BASE + index
