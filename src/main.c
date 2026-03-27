@@ -81,6 +81,18 @@ void main (){
 	LCD_FSM_init();
 
 	printf("start\r\n");
+	{
+		unsigned int ble_counter = 0;
+		char ble_buf[24];
+		while(1){
+			sprintf(ble_buf, "test:%u\r\n", ble_counter++);
+			UART1_send_string(ble_buf);
+			// Echo anything received on UART1 back
+			while (UART1_available())
+				UART1_send_char(UART1_read());
+			waitms(500);
+		}
+	}
 	while(1){
 		joystick_x = Volts_at_Pin(JOYSTICK_X);
 		joystick_y = Volts_at_Pin(JOYSTICK_Y);
@@ -98,27 +110,41 @@ void main (){
 				while (fsm_state == FSM_IDLE);
 				while (fsm_state != FSM_IDLE);
 			} else if (lcd_state == LCD_S5) {
-				// Auto mode: send mode, path, then start
-				IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+				if (prev_lcd_state == LCD_S7) {
+					// Resume from pause
+					IR_Send(IR_CMD_RESUME, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				} else {
+					// Fresh start: send mode, path, then start
+					IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
 
-				IR_Send(IR_CMD_PATH, active_path, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+					IR_Send(IR_CMD_PATH, active_path, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
 
-				IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+					IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				}
 			} else if (lcd_state == LCD_S6) {
-				// Remote mode: send mode, then start
-				IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+				if (prev_lcd_state == LCD_S7) {
+					// Resume from pause
+					IR_Send(IR_CMD_RESUME, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				} else {
+					// Fresh start: send mode, then start
+					IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
 
-				IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
-				while (fsm_state == FSM_IDLE);
-				while (fsm_state != FSM_IDLE);
+					IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+					while (fsm_state == FSM_IDLE);
+					while (fsm_state != FSM_IDLE);
+				}
 			}
 			prev_lcd_state = lcd_state;
 		}
@@ -134,13 +160,12 @@ void main (){
 			while (fsm_state != FSM_IDLE);
 		}
 
-		// UART0: debug
-		printf("X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
-
-		// UART1: data to PC via FT230XS
+		// UART0: JDY-23 BLE → PC
+		// UART1: FT230XS USB → PC
 		{
 			char buf[17];
 			sprintf(buf, "X=%3u Y=%3u\r\n", (unsigned int)x_byte, (unsigned int)y_byte);
+			UART0_send_string(buf);
 			UART1_send_string(buf);
 		}
 	}

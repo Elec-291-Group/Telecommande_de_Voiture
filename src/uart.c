@@ -152,10 +152,10 @@ void UART1_init(void)
     /* UART1: 8-bit UART (mode 1), receiver enabled */
     SCON1  = 0x10u;
 
-    /* Dedicated baud-rate generator: ~115200 baud @ 72 MHz SYSCLK */
+    /* Dedicated baud-rate generator: ~9600 baud @ 72 MHz SYSCLK (JDY-23 default) */
     SMOD1  = 0x0Cu;     /* SDL[3:2]=11 = 8-bit data length (matches reset default) */
-    SBRLH1 = 0xFEu;
-    SBRLL1 = 0xC8u;
+    SBRLH1 = 0xF1u;
+    SBRLL1 = 0x9Au;
     SBCON1 = 0x43u;     /* enable baud-rate generator (BCLKEN|SBRUN|BGCLK=SYSCLK) */
 
     /* EIE2 lives on page 0x00 */

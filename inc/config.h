@@ -28,6 +28,7 @@
 #define IR_CMD_PATH       0x4   // data: 0x00=path1, 0x01=path2, 0x02=path3
 #define IR_CMD_JOYSTICK_X 0x5   // data = joystick_x byte
 #define IR_CMD_JOYSTICK_Y 0x6   // data = joystick_y byte
+#define IR_CMD_RESUME     0x7   // data = 0xFF — resume from pause
 
 #define IR_ADDR           0xB   // device address nibble
 
