@@ -17,7 +17,7 @@ void putchar(char c) { UART0_send_char(c); }
 static void IR_debug(void)
 {
     IR_Frame_t f;
-    //send_ir_packet((uint8_t)IR_CMD_START, (uint16_t)0x0000, (uint8_t)IR_ADDR1);
+    send_ir_packet((uint8_t)IR_CMD_START, (uint16_t)0x0000, (uint8_t)IR_ADDR1);
     while (IR_RX_get(&f))
         if (f.addr == IR_ADDR2)
             printf("cmd=%u val=0x%04X addr=0x%X\r\n",
@@ -97,18 +97,6 @@ void main (){
 	LCD_FSM_init();
 
 	printf("start\r\n");
-	{
-		unsigned int ble_counter = 0;
-		char ble_buf[24];
-		while(1){
-			sprintf(ble_buf, "test:%u\r\n", ble_counter++);
-			UART1_send_string(ble_buf);
-			// Echo anything received on UART1 back
-			while (UART1_available())
-				UART1_send_char(UART1_read());
-			waitms(500);
-		}
-	}
 	while(1){
 		IR_debug();
 		/*
