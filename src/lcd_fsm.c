@@ -1,7 +1,7 @@
-#include <stdio.h>
 #include "lcd_fsm.h"
 #include "lcd.h"
 #include "config.h"
+#include "data_buffers.h"
 
 // ---- Joystick thresholds ----
 #define JOY_HIGH     200
@@ -11,9 +11,9 @@
 
 // ---- Public state ----
 lcd_state_t   lcd_state    = LCD_S0;
-unsigned char selected_mode = 0;   // 0=field tracking, 1=remote, 2=path tracking  (navigation cursor)
+unsigned char selected_mode = 0;   // 0=auto, 1=remote, 2=pathfind
 unsigned char selected_path = 0;   // 0=path1, 1=path2, 2=path3  (navigation cursor)
-unsigned char active_mode   = 0;   // locked in when running starts: 0=field tracking, 1=remote, 2=path tracking
+unsigned char active_mode   = 0;   // locked in when running starts: 0=auto, 1=remote, 2=pathfind
 unsigned char active_path   = 0;   // locked in when running starts: 0=path1, 1=path2, 2=path3
 
 // ---- Internal ----
@@ -26,6 +26,106 @@ static bit joy_y_ready = 1;
 // Button latches: must release before next press registers
 static bit pb0_ready = 1;
 static bit pb1_ready = 1;
+static Waypoint_t xdata path_test_waypoint;
+static unsigned char path_test_count = 0;
+static char xdata lcd_line_buf[17];
+
+static void format_joystick_status(char *buf, unsigned char x_byte, unsigned char y_byte)
+{
+    buf[0] = 'X';
+    buf[1] = ':';
+    buf[2] = (char)('0' + (x_byte / 100u));
+    buf[3] = (char)('0' + ((x_byte / 10u) % 10u));
+    buf[4] = (char)('0' + (x_byte % 10u));
+    buf[5] = ' ';
+    buf[6] = 'Y';
+    buf[7] = ':';
+    buf[8] = (char)('0' + (y_byte / 100u));
+    buf[9] = (char)('0' + ((y_byte / 10u) % 10u));
+    buf[10] = (char)('0' + (y_byte % 10u));
+    buf[11] = ' ';
+    buf[12] = ' ';
+    buf[13] = ' ';
+    buf[14] = ' ';
+    buf[15] = ' ';
+    buf[16] = '\0';
+}
+
+static void format_uint3(char *buf, unsigned int value)
+{
+    if (value > 999u)
+        value = 999u;
+
+    buf[0] = (char)('0' + (value / 100u));
+    buf[1] = (char)('0' + ((value / 10u) % 10u));
+    buf[2] = (char)('0' + (value % 10u));
+}
+
+static void format_coord4(char *buf, int value)
+{
+    unsigned int magnitude;
+
+    if (value < 0) {
+        buf[0] = '-';
+        magnitude = (unsigned int)(-value);
+    } else {
+        buf[0] = '+';
+        magnitude = (unsigned int)value;
+    }
+
+    if (magnitude > 999u)
+        magnitude = 999u;
+
+    buf[1] = (char)('0' + (magnitude / 100u));
+    buf[2] = (char)('0' + ((magnitude / 10u) % 10u));
+    buf[3] = (char)('0' + (magnitude % 10u));
+}
+
+static void format_path_buffer_status(char *buf)
+{
+    if (!PathBuffer_is_loaded()) {
+        LCDprint("Path:not loaded ", 1, 0);
+        LCDprint("Wait PATH_END   ", 2, 0);
+        return;
+    }
+
+    path_test_count = PathBuffer_get_count();
+    if ((path_test_count == 0u) || !PathBuffer_get(0u, &path_test_waypoint)) {
+        LCDprint("Path N:000      ", 1, 0);
+        LCDprint("No waypoint     ", 2, 0);
+        return;
+    }
+
+    buf[0] = 'P';
+    buf[1] = 'a';
+    buf[2] = 't';
+    buf[3] = 'h';
+    buf[4] = ' ';
+    buf[5] = 'N';
+    buf[6] = ':';
+    format_uint3(&buf[7], path_test_count);
+    buf[10] = ' ';
+    buf[11] = ' ';
+    buf[12] = ' ';
+    buf[13] = ' ';
+    buf[14] = ' ';
+    buf[15] = ' ';
+    buf[16] = '\0';
+    LCDprint(buf, 1, 0);
+
+    buf[0] = 'X';
+    buf[1] = ':';
+    format_coord4(&buf[2], path_test_waypoint.x_cm);
+    buf[6] = ' ';
+    buf[7] = 'Y';
+    buf[8] = ':';
+    format_coord4(&buf[9], path_test_waypoint.y_cm);
+    buf[13] = ' ';
+    buf[14] = ' ';
+    buf[15] = ' ';
+    buf[16] = '\0';
+    LCDprint(buf, 2, 0);
+}
 
 // ---- Redraw current state to LCD ----
 static void redraw(void)
@@ -92,6 +192,16 @@ static void redraw(void)
             LCDprint("PB0:Go  PB1:Rst ", 2, 0);
             break;
 
+        case LCD_S8:
+            LCDprint("Ready (Path)    ", 1, 0);
+            LCDprint("Press PB0       ", 2, 0);
+            break;
+
+        case LCD_S9:
+            LCDprint("Path test mode  ", 1, 0);
+            LCDprint("Wait PATH_END   ", 2, 0);
+            break;
+
         default:
             break;
     }
@@ -115,7 +225,6 @@ void LCD_FSM_init(void)
 // ---- Update — call every main loop iteration ----
 void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
 {
-    char buf[17];
     unsigned char pb0_pressed = 0;
     unsigned char pb1_pressed = 0;
     unsigned char joy_up      = 0;
@@ -180,6 +289,11 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
             if (joy_up)      lcd_state = LCD_S1;
             break;
 
+        case LCD_S8:
+            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S9; }
+            if (joy_up)      lcd_state = LCD_S1;
+            break;
+
         case LCD_S5:
             if (pb1_pressed) lcd_state = LCD_S7;
             break;
@@ -224,7 +338,11 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
 
     // Live joystick update in S6
     if (lcd_state == LCD_S6 && prev_state == LCD_S6) {
-        sprintf(buf, "X:%3u Y:%3u     ", (unsigned int)x_byte, (unsigned int)y_byte);
-        LCDprint(buf, 2, 0);
+        format_joystick_status(lcd_line_buf, x_byte, y_byte);
+        LCDprint(lcd_line_buf, 2, 0);
+    }
+
+    if (lcd_state == LCD_S9 && prev_state == LCD_S9) {
+        format_path_buffer_status(lcd_line_buf);
     }
 }

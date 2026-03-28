@@ -16,9 +16,9 @@ typedef enum {
 } lcd_state_t;
 
 extern lcd_state_t    lcd_state;
-extern unsigned char  selected_mode;  // 0=auto, 1=remote  (navigation cursor)
+extern unsigned char  selected_mode;  // 0=auto, 1=remote, 2=pathfind
 extern unsigned char  selected_path;  // 0=path1, 1=path2, 2=path3  (navigation cursor)
-extern unsigned char  active_mode;    // locked in at start: 0=auto, 1=remote
+extern unsigned char  active_mode;    // locked in at start: 0=auto, 1=remote, 2=pathfind
 extern unsigned char  active_path;    // locked in at start: 0=path1, 1=path2, 2=path3
 
 void LCD_FSM_init(void);
