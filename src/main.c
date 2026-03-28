@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <EFM8LB1.h>
-#include <string.h>
 #include "bootloader.h"
 #include "timer.h"
 #include "ir_tx.h"
@@ -10,212 +9,9 @@
 #include "lcd.h"
 #include "lcd_fsm.h"
 #include "data_buffers.h"
+#include "bluetooth.h"
 
-static bit bluetooth_stream_enabled = 0;
-static char xdata bluetooth_cmd_buf[24];
-static char xdata bluetooth_parse_buf[24];
-static IR_Frame_t xdata bluetooth_rx_frame;
-static char xdata uart_digits[5];
-
-static int parse_signed_int(const char *text, unsigned char *ok)
-{
-	int sign = 1;
-	int value = 0;
-	char c;
-
-	*ok = 0;
-	if ((text == 0) || (*text == '\0'))
-		return 0;
-
-	if (*text == '-') {
-		sign = -1;
-		text++;
-	} else if (*text == '+') {
-		text++;
-	}
-
-	if (*text == '\0')
-		return 0;
-
-	while ((c = *text++) != '\0') {
-		if ((c < '0') || (c > '9'))
-			return 0;
-		value = (value * 10) + (c - '0');
-	}
-
-	*ok = 1;
-	return sign * value;
-}
-
-static void Bluetooth_send_rx_cmd_echo(const char *cmd_text)
-{
-	UART1_send_string("RX_CMD,");
-	UART1_send_string(cmd_text);
-	UART1_send_string("\r\n");
-}
-
-static void UART1_send_uint(unsigned int value)
-{
-	unsigned char count = 0;
-
-	if (value == 0) {
-		UART1_send_char('0');
-		return;
-	}
-
-	while ((value > 0) && (count < sizeof(uart_digits))) {
-		uart_digits[count++] = (char)('0' + (value % 10u));
-		value /= 10u;
-	}
-
-	while (count > 0)
-		UART1_send_char(uart_digits[--count]);
-}
-
-static void Bluetooth_stream_imu_frame(const IR_Frame_t *frame)
-{
-	UART1_send_string("imu,");
-	UART1_send_uint((unsigned int)(frame->cmd - IMU_CMD_BASE));
-	UART1_send_char(',');
-	UART1_send_uint(frame->val);
-	UART1_send_string("\r\n");
-}
-
-static void Bluetooth_handle_path_command(const char *cmd_text)
-{
-	char *path_token;
-	char *path_arg1;
-	char *path_arg2;
-	char *path_arg3;
-	unsigned char path_ok1;
-	unsigned char path_ok2;
-	unsigned char path_ok3;
-	int path_value1;
-	int path_value2;
-	int path_value3;
-
-	strcpy(bluetooth_parse_buf, cmd_text);
-	path_token = strtok(bluetooth_parse_buf, ",");
-	if (path_token == 0)
-		return;
-
-	if (strcmp(path_token, "PATH_BEGIN") == 0)
-	{
-		path_arg1 = strtok(0, ",");
-		if (path_arg1 == 0)
-		{
-			UART1_send_string("PATH_ACK,ERROR\r\n");
-			return;
-		}
-
-		path_value1 = parse_signed_int(path_arg1, &path_ok1);
-		if (!path_ok1 || !PathBuffer_begin((unsigned char)path_value1))
-		{
-			UART1_send_string("PATH_ACK,ERROR\r\n");
-			return;
-		}
-
-		UART1_send_string("PATH_ACK,BEGIN\r\n");
-		return;
-	}
-
-	if (strcmp(path_token, "WPT") == 0)
-	{
-		path_arg1 = strtok(0, ",");
-		path_arg2 = strtok(0, ",");
-		path_arg3 = strtok(0, ",");
-		if ((path_arg1 == 0) || (path_arg2 == 0) || (path_arg3 == 0))
-			return;
-
-		path_value1 = parse_signed_int(path_arg1, &path_ok1);
-		path_value2 = parse_signed_int(path_arg2, &path_ok2);
-		path_value3 = parse_signed_int(path_arg3, &path_ok3);
-		if (!path_ok1 || !path_ok2 || !path_ok3)
-			return;
-
-		if (PathBuffer_store((unsigned char)path_value1, path_value2, path_value3))
-			Bluetooth_send_rx_cmd_echo(cmd_text);
-		return;
-	}
-
-	if (strcmp(path_token, "PATH_END") == 0)
-	{
-		if (PathBuffer_commit())
-			UART1_send_string("PATH_ACK,LOADED\r\n");
-		else
-			UART1_send_string("PATH_ACK,ERROR\r\n");
-	}
-}
-
-static void Bluetooth_handle_commands(void)
-{
-    static unsigned char cmd_len = 0;
-
-    while (UART1_available())
-    {
-        char c = UART1_read();
-
-        if (c == '\r')
-            continue;
-
-        if (c == '\n')
-        {
-            bluetooth_cmd_buf[cmd_len] = '\0';
-
-            if (strcmp(bluetooth_cmd_buf, "STREAM_ON") == 0)
-            {
-                bluetooth_stream_enabled = 1;
-                UART1_send_string("OK,STREAM_ON\r\n");
-            }
-            else if (strcmp(bluetooth_cmd_buf, "STREAM_OFF") == 0)
-            {
-                bluetooth_stream_enabled = 0;
-                UART1_send_string("OK,STREAM_OFF\r\n");
-            }
-            else if (strcmp(bluetooth_cmd_buf, "STATUS") == 0)
-            {
-                UART1_send_string(bluetooth_stream_enabled ? "STATUS,STREAM_ON\r\n"
-                                                           : "STATUS,STREAM_OFF\r\n");
-            }
-            else if ((strncmp(bluetooth_cmd_buf, "PATH_BEGIN,", 11) == 0) ||
-                     (strncmp(bluetooth_cmd_buf, "WPT,", 4) == 0) ||
-                     (strcmp(bluetooth_cmd_buf, "PATH_END") == 0))
-            {
-                Bluetooth_handle_path_command(bluetooth_cmd_buf);
-            }
-            else if (cmd_len > 0)
-            {
-                UART1_send_string("ERR,UNKNOWN_CMD\r\n");
-            }
-
-            cmd_len = 0;
-            continue;
-        }
-
-        if (cmd_len < (sizeof(bluetooth_cmd_buf) - 1))
-            bluetooth_cmd_buf[cmd_len++] = c;
-        else
-            cmd_len = 0;
-    }
-}
-
-static void IR_forward_imu_to_bluetooth(void)
-{
-    while (IR_RX_get(&bluetooth_rx_frame))
-    {
-        if (bluetooth_rx_frame.addr != IR_ADDR2)
-            continue;
-
-        IMUBuffer_push_frame(&bluetooth_rx_frame);
-
-        if (bluetooth_stream_enabled &&
-            bluetooth_rx_frame.cmd >= IMU_CMD_BASE &&
-            bluetooth_rx_frame.cmd < IMU_CMD_BASE + IMU_REG_COUNT)
-        {
-            Bluetooth_stream_imu_frame(&bluetooth_rx_frame);
-        }
-    }
-}
+unsigned char crossing_action = 0;
 
 void InitPinADC (unsigned char portno, unsigned char pinno)
 {
@@ -266,15 +62,161 @@ unsigned char volt_to_byte(float v)
 	return (unsigned char)val;
 }
 
-void IR_debug() {
-	IR_Frame_t f;
+static void uart0_send_hex_byte(unsigned char v)
+{
+    unsigned char n;
+    n = (v >> 4) & 0x0Fu;
+    UART0_send_char((char)(n < 10u ? '0' + n : 'A' + n - 10u));
+    n = v & 0x0Fu;
+    UART0_send_char((char)(n < 10u ? '0' + n : 'A' + n - 10u));
+}
+
+void IR_debug(void)
+{
+    IR_Frame_t f;
     send_ir_packet((uint8_t)IR_CMD_START, (uint16_t)0x0000, (uint8_t)IR_ADDR1);
-    while (IR_RX_get(&f))
-        if (f.addr == IR_ADDR2)
-            printf("cmd=%u val=0x%04X addr=0x%X\r\n",
-                   (unsigned int)f.cmd,
-                   (unsigned int)f.val,
-                   (unsigned int)f.addr);
+    while (IR_RX_get(&f)) {
+        if (f.addr == IR_ADDR2) {
+            UART0_send_string("cmd=");
+            uart0_send_hex_byte(f.cmd);
+            UART0_send_string(" val=0x");
+            uart0_send_hex_byte((unsigned char)(f.val >> 8));
+            uart0_send_hex_byte((unsigned char)(f.val & 0xFFu));
+            UART0_send_string(" addr=0x");
+            uart0_send_hex_byte(f.addr);
+            UART0_send_string("\r\n");
+        }
+    }
+}
+
+void IR_RX_decode_command(const IR_Frame_t *frame)
+{
+    switch (frame->cmd)
+    {
+        case IR_RX_CMD_PATH_ARRIVED:
+            if (lcd_state == LCD_S10)
+                lcd_state = LCD_S12;
+            break;
+
+        case IR_RX_CMD_CROSSING_ACTION:
+            crossing_action = (unsigned char)(frame->val & 0xFF);
+            break;
+
+        default:
+            break;
+    }
+}
+
+static bit pb_start_latch  = 1;
+static bit pb_pause_latch  = 1;
+static bit pb_reset_latch  = 1;
+static bit pbtxcmd_latch   = 1;
+static bit pbsw_s12_latch  = 1;
+
+static void handle_pb_start(void)
+{
+    if (PB_START == 0) {
+        if (pb_start_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            pb_start_latch = 0;
+        }
+    } else {
+        pb_start_latch = 1;
+    }
+}
+
+static void handle_pb_pause(void)
+{
+    if (PB_PAUSE == 0) {
+        if (pb_pause_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_PAUSE, 0x0000, IR_ADDR);
+            if (lcd_state == LCD_S5  || lcd_state == LCD_S6 ||
+                lcd_state == LCD_S9  || lcd_state == LCD_S11)
+                LCD_FSM_pause(lcd_state);
+            pb_pause_latch = 0;
+        }
+    } else {
+        pb_pause_latch = 1;
+    }
+}
+
+static void handle_pb_reset(void)
+{
+    if (PB_RESET == 0) {
+        if (pb_reset_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_RESET, 0x0000, IR_ADDR);
+            lcd_state = LCD_S0;
+            pb_reset_latch = 0;
+        }
+    } else {
+        pb_reset_latch = 1;
+    }
+}
+
+static void send_path_waypoints(void)
+{
+    unsigned char count = PathBuffer_get_count();
+    unsigned char i;
+    Waypoint_t wpt;
+
+    for (i = 0; i < count; i++) {
+        if (!PathBuffer_get(i, &wpt))
+            continue;
+        send_ir_packet(
+            (uint8_t)(IR_CMD_PATH_WPT_BASE + i),
+            (uint16_t)(((uint16_t)(wpt.x_cm & 0xFF) << 8) | (uint16_t)(wpt.y_cm & 0xFF)),
+            IR_ADDR
+        );
+        while (fsm_state == FSM_IDLE);
+        while (fsm_state != FSM_IDLE);
+    }
+}
+
+static void handle_s10_buttons(void)
+{
+    if (lcd_state != LCD_S10) {
+        pbtxcmd_latch = 1;
+        return;
+    }
+
+    /* PB_TXCMD: transmit all waypoints via IR */
+    if (PB_TXCMD == 0) {
+        if (pbtxcmd_latch && fsm_state == FSM_IDLE) {
+            send_path_waypoints();
+            pbtxcmd_latch = 0;
+        }
+    } else {
+        pbtxcmd_latch = 1;
+    }
+}
+
+static void handle_s12_buttons(void)
+{
+    if (lcd_state != LCD_S12) {
+        pbsw_s12_latch = 1;
+        return;
+    }
+
+    /* PB_TXCMD: re-transmit all waypoints via IR */
+    if (PB_TXCMD == 0) {
+        if (pbtxcmd_latch && fsm_state == FSM_IDLE) {
+            send_path_waypoints();
+            pbtxcmd_latch = 0;
+        }
+    } else {
+        pbtxcmd_latch = 1;
+    }
+
+    /* JoyStick_SW: send IR_CMD_START and enter Running (Path) */
+    if (JoyStick_SW == 0) {
+        if (pbsw_s12_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            lcd_state = LCD_S11;
+            pbsw_s12_latch = 0;
+        }
+    } else {
+        pbsw_s12_latch = 1;
+    }
 }
 
 // ---- Main ----
@@ -283,7 +225,6 @@ void main (){
 	static xdata float joystick_y;
 	unsigned char x_byte, y_byte;
 	lcd_state_t prev_lcd_state = LCD_NUM_STATES;
-	static xdata char ble_buf[17];
 
 	init_pin_input();
 	TIMER0_Init();
@@ -304,8 +245,7 @@ void main (){
 	UART0_send_string("start\r\n");
 	while(1){
 		Bluetooth_handle_commands();
-		IR_forward_imu_to_bluetooth();
-		IR_debug();
+		Bluetooth_forward_imu();
 
 		joystick_x = Volts_at_Pin(JOYSTICK_X);
 		joystick_y = Volts_at_Pin(JOYSTICK_Y);
@@ -314,6 +254,12 @@ void main (){
 		y_byte = volt_to_byte(joystick_y);
 
 		LCD_FSM_update(x_byte, y_byte);
+
+		handle_pb_start();
+		handle_pb_pause();
+		handle_pb_reset();
+		handle_s10_buttons();
+		handle_s12_buttons();
 
 		// On transition into a running/pause state, send IR command
 		if (lcd_state != prev_lcd_state) {
@@ -365,26 +311,12 @@ void main (){
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 				} else {
-					// Fresh start: send mode, then start
+					// Fresh start: send mode, waypoints, then start
 					send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 
-					send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
-					while (fsm_state == FSM_IDLE);
-					while (fsm_state != FSM_IDLE);
-				}
-			} else if (lcd_state == LCD_S9) {
-				if (prev_lcd_state == LCD_S7) {
-					// Resume from pause
-					send_ir_packet(IR_CMD_RESUME, 0xFF, IR_ADDR);
-					while (fsm_state == FSM_IDLE);
-					while (fsm_state != FSM_IDLE);
-				} else {
-					// Fresh start: send mode, then start
-					send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
-					while (fsm_state == FSM_IDLE);
-					while (fsm_state != FSM_IDLE);
+					send_path_waypoints();
 
 					send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
 					while (fsm_state == FSM_IDLE);

@@ -12,7 +12,8 @@ from PyQt5.QtGui import QColor, QPainter, QPen, QBrush, QLinearGradient, QFont
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QTextEdit, QFileDialog, QMessageBox,
-    QGroupBox, QCheckBox, QSlider, QDoubleSpinBox, QTabWidget
+    QGroupBox, QCheckBox, QSlider, QDoubleSpinBox, QTabWidget,
+    QSizePolicy
 )
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -21,6 +22,289 @@ if str(ROOT_DIR) not in sys.path:
 
 from ble_receiver import BleWorker, DEFAULT_DEVICE_NAME, scan_ble_devices
 from pathfinder import PathfinderTab
+
+
+# ── Dark theme stylesheet ────────────────────────────────────────────────────
+LIGHT_STYLESHEET = """
+/* ── Global ── */
+QWidget {
+    background-color: #f8f9fb;
+    color: #1e293b;
+    font-family: 'Segoe UI', 'Inter', 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+}
+
+/* ── Tab widget ── */
+QTabWidget::pane {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8f9fb;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #eef1f5;
+    color: #64748b;
+    border: 1px solid #e2e8f0;
+    border-bottom: none;
+    padding: 10px 28px;
+    margin-right: 2px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+}
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #2563eb;
+    border-bottom: 2px solid #2563eb;
+}
+QTabBar::tab:hover:!selected {
+    background: #e8ecf1;
+    color: #475569;
+}
+
+/* ── Group boxes ── */
+QGroupBox {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    margin-top: 18px;
+    padding: 18px 14px 12px 14px;
+    font-weight: 700;
+    font-size: 13px;
+    color: #475569;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 16px;
+    padding: 2px 10px;
+    background: #eef2ff;
+    border-radius: 4px;
+    color: #2563eb;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+/* ── Buttons ── */
+QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ffffff, stop:1 #f1f5f9);
+    color: #334155;
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    padding: 8px 18px;
+    font-weight: 600;
+    font-size: 14px;
+    min-height: 22px;
+}
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #f8fafc, stop:1 #e2e8f0);
+    border-color: #94a3b8;
+    color: #1e293b;
+}
+QPushButton:pressed {
+    background: #e2e8f0;
+    border-color: #2563eb;
+}
+QPushButton:disabled {
+    background: #f1f5f9;
+    color: #94a3b8;
+    border-color: #e2e8f0;
+}
+
+/* ── Primary action buttons ── */
+QPushButton#connectBtn {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #3b82f6, stop:1 #2563eb);
+    color: #ffffff;
+    border: 1px solid #2563eb;
+}
+QPushButton#connectBtn:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #60a5fa, stop:1 #3b82f6);
+    border-color: #3b82f6;
+}
+QPushButton#connectBtn:disabled {
+    background: #f1f5f9;
+    color: #94a3b8;
+    border-color: #e2e8f0;
+}
+
+QPushButton#disconnectBtn {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #fef2f2, stop:1 #fee2e2);
+    color: #dc2626;
+    border: 1px solid #fca5a5;
+}
+QPushButton#disconnectBtn:hover {
+    background: #fee2e2;
+    border-color: #f87171;
+}
+QPushButton#disconnectBtn:disabled {
+    background: #f1f5f9;
+    color: #94a3b8;
+    border-color: #e2e8f0;
+}
+
+QPushButton#estopBtn {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #ef4444, stop:1 #dc2626);
+    color: #ffffff;
+    border: 2px solid #dc2626;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 800;
+    padding: 10px;
+    letter-spacing: 1px;
+}
+QPushButton#estopBtn:hover {
+    background: #f87171;
+    border-color: #ef4444;
+}
+
+/* ── Combo box ── */
+QComboBox {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    padding: 7px 12px;
+    color: #1e293b;
+    font-size: 13px;
+    min-height: 20px;
+}
+QComboBox:hover {
+    border-color: #94a3b8;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 28px;
+}
+QComboBox::down-arrow {
+    image: none;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #64748b;
+    margin-right: 8px;
+}
+QComboBox QAbstractItemView {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    color: #1e293b;
+    selection-background-color: #dbeafe;
+    selection-color: #1d4ed8;
+}
+
+/* ── Text area / Console ── */
+QTextEdit {
+    background: #ffffff;
+    color: #047857;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 12px;
+    selection-background-color: #bfdbfe;
+}
+
+/* ── Labels ── */
+QLabel {
+    color: #1e293b;
+    background: transparent;
+    border: none;
+}
+
+/* ── Checkboxes ── */
+QCheckBox {
+    color: #475569;
+    spacing: 8px;
+    font-size: 12px;
+}
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #cbd5e1;
+    border-radius: 4px;
+    background: #ffffff;
+}
+QCheckBox::indicator:checked {
+    background: #2563eb;
+    border-color: #3b82f6;
+}
+QCheckBox::indicator:hover {
+    border-color: #3b82f6;
+}
+
+/* ── Sliders ── */
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #e2e8f0;
+    border-radius: 3px;
+}
+QSlider::handle:horizontal {
+    background: #3b82f6;
+    border: 2px solid #2563eb;
+    width: 16px;
+    height: 16px;
+    margin: -6px 0;
+    border-radius: 9px;
+}
+QSlider::handle:horizontal:hover {
+    background: #60a5fa;
+    border-color: #3b82f6;
+}
+QSlider::sub-page:horizontal {
+    background: #3b82f6;
+    border-radius: 3px;
+}
+
+/* ── Spin boxes ── */
+QDoubleSpinBox {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 5px 8px;
+    color: #1e293b;
+    font-size: 12px;
+    min-height: 18px;
+}
+QDoubleSpinBox:hover {
+    border-color: #94a3b8;
+}
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+    background: #f1f5f9;
+    border: none;
+    width: 18px;
+}
+
+/* ── Scrollbars ── */
+QScrollBar:vertical {
+    background: #f8f9fb;
+    width: 8px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical {
+    background: #cbd5e1;
+    border-radius: 4px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #94a3b8;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+/* ── Separator lines ── */
+QFrame#separator {
+    background: #e2e8f0;
+    max-height: 1px;
+    min-height: 1px;
+}
+"""
 
 
 def compute_roll_pitch(ax, ay, az):
@@ -60,105 +344,180 @@ class RobotVisualizationWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
 
         bg = QLinearGradient(0, 0, 0, self.height())
-        bg.setColorAt(0.0, QColor(16, 20, 28))
-        bg.setColorAt(1.0, QColor(5, 8, 14))
+        bg.setColorAt(0.0, QColor(241, 245, 249))
+        bg.setColorAt(0.5, QColor(234, 239, 245))
+        bg.setColorAt(1.0, QColor(226, 232, 240))
         painter.fillRect(self.rect(), bg)
 
         w = self.width()
         h = self.height()
         cx = w / 2.0
 
-        painter.setPen(QPen(QColor(48, 60, 78), 2))
-        lane_left = int(cx - 110)
-        lane_right = int(cx + 110)
+        # Road surface glow
+        road_glow = QLinearGradient(cx - 90, 0, cx + 90, 0)
+        road_glow.setColorAt(0.0, QColor(255, 255, 255, 0))
+        road_glow.setColorAt(0.3, QColor(203, 213, 225, 50))
+        road_glow.setColorAt(0.5, QColor(186, 199, 214, 70))
+        road_glow.setColorAt(0.7, QColor(203, 213, 225, 50))
+        road_glow.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.fillRect(QRectF(cx - 90, 30, 180, h - 130), road_glow)
+
+        # Lane lines
+        painter.setPen(QPen(QColor(186, 199, 214), 2))
+        lane_left = int(cx - 72)
+        lane_right = int(cx + 72)
         painter.drawLine(lane_left, 40, lane_left, h - 110)
         painter.drawLine(lane_right, 40, lane_right, h - 110)
 
-        painter.setPen(QPen(QColor(80, 94, 118), 2, Qt.DashLine))
+        painter.setPen(QPen(QColor(160, 175, 195), 2, Qt.DashLine))
         painter.drawLine(int(cx), 40, int(cx), h - 110)
 
-        car_w = 150.0
-        car_h = 290.0
-        body_x = cx - car_w / 2.0 + max(min(self.roll_deg, 22.0), -22.0) * 1.1
-        body_y = 120.0 + max(min(self.pitch_deg, 22.0), -22.0) * 1.2
+        car_w = 100.0
+        car_h = 195.0
+        cy = h / 2.0 - 20
+        body_x = cx - car_w / 2.0 + max(min(self.roll_deg, 22.0), -22.0) * 0.7
+        body_y = cy - car_h / 2.0 + max(min(self.pitch_deg, 22.0), -22.0) * 0.8
         body = QRectF(body_x, body_y, car_w, car_h)
 
+        # Car body shadow
+        shadow = QRectF(body.left() + 4, body.top() + 6, car_w, car_h)
+        painter.setBrush(QColor(100, 116, 139, 40))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(shadow, 24, 24)
+
+        # Car body
         shell_grad = QLinearGradient(body.left(), body.top(), body.right(), body.bottom())
-        shell_grad.setColorAt(0.0, QColor(228, 232, 238))
-        shell_grad.setColorAt(0.45, QColor(145, 153, 165))
-        shell_grad.setColorAt(1.0, QColor(54, 60, 70))
+        shell_grad.setColorAt(0.0, QColor(59, 130, 246))
+        shell_grad.setColorAt(0.3, QColor(37, 99, 235))
+        shell_grad.setColorAt(0.7, QColor(29, 78, 216))
+        shell_grad.setColorAt(1.0, QColor(30, 64, 175))
         painter.setBrush(QBrush(shell_grad))
-        painter.setPen(QPen(QColor(245, 248, 255), 2))
-        painter.drawRoundedRect(body, 34, 34)
+        painter.setPen(QPen(QColor(96, 165, 250, 180), 1.5))
+        painter.drawRoundedRect(body, 24, 24)
 
-        cabin = QRectF(body.left() + 18, body.top() + 30, car_w - 36, car_h - 95)
-        painter.setBrush(QColor(28, 37, 52, 220))
-        painter.setPen(QPen(QColor(126, 180, 224), 2))
-        painter.drawRoundedRect(cabin, 26, 26)
+        # Cabin
+        cabin = QRectF(body.left() + 12, body.top() + 20, car_w - 24, car_h - 64)
+        cabin_grad = QLinearGradient(cabin.left(), cabin.top(), cabin.left(), cabin.bottom())
+        cabin_grad.setColorAt(0.0, QColor(191, 219, 254, 200))
+        cabin_grad.setColorAt(1.0, QColor(147, 197, 253, 180))
+        painter.setBrush(QBrush(cabin_grad))
+        painter.setPen(QPen(QColor(255, 255, 255, 120), 1.5))
+        painter.drawRoundedRect(cabin, 18, 18)
 
-        wheel_color = QColor(70, 74, 80)
-        wheel_glow = QColor(255, 164, 79) if self.moving else QColor(103, 187, 255)
+        # Wheels
+        wheel_color = QColor(51, 65, 85)
+        wheel_glow = QColor(234, 88, 12) if self.moving else QColor(37, 99, 235)
         painter.setBrush(wheel_color)
-        painter.setPen(QPen(wheel_glow, 3))
+        painter.setPen(QPen(wheel_glow, 2))
         wheel_rects = [
-            QRectF(body.left() - 18, body.top() + 34, 18, 64),
-            QRectF(body.right(), body.top() + 34, 18, 64),
-            QRectF(body.left() - 18, body.bottom() - 98, 18, 64),
-            QRectF(body.right(), body.bottom() - 98, 18, 64),
+            QRectF(body.left() - 13, body.top() + 22, 13, 44),
+            QRectF(body.right(), body.top() + 22, 13, 44),
+            QRectF(body.left() - 13, body.bottom() - 66, 13, 44),
+            QRectF(body.right(), body.bottom() - 66, 13, 44),
         ]
         for wheel in wheel_rects:
-            painter.drawRoundedRect(wheel, 8, 8)
+            painter.drawRoundedRect(wheel, 6, 6)
 
-        accel_mag = min((self.accel[0] * self.accel[0] + self.accel[1] * self.accel[1] + self.accel[2] * self.accel[2]) ** 0.5, 2.0)
-        ring_color = QColor(255, 140, 92, 120) if self.moving else QColor(83, 196, 255, 90)
+        # Energy ring
+        accel_mag = min((self.accel[0] ** 2 + self.accel[1] ** 2 + self.accel[2] ** 2) ** 0.5, 2.0)
+        ring_color = QColor(234, 88, 12, 60) if self.moving else QColor(37, 99, 235, 45)
         painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(ring_color, 8))
-        painter.drawEllipse(QRectF(cx - 125 - accel_mag * 18, body.top() - 24 - accel_mag * 10, 250 + accel_mag * 36, 340 + accel_mag * 20))
+        painter.setPen(QPen(ring_color, 5))
+        painter.drawEllipse(QRectF(
+            cx - 82 - accel_mag * 12, body.top() - 16 - accel_mag * 7,
+            164 + accel_mag * 24, 228 + accel_mag * 14
+        ))
+
+        # Outer subtle ring
+        painter.setPen(QPen(QColor(ring_color.red(), ring_color.green(), ring_color.blue(), 18), 10))
+        painter.drawEllipse(QRectF(
+            cx - 90 - accel_mag * 14, body.top() - 24 - accel_mag * 8,
+            180 + accel_mag * 28, 244 + accel_mag * 16
+        ))
 
         title_font_size = 18 if w >= 720 else 15
         status_font_size = 10 if w >= 720 else 9
-        metric_value_font_size = 20 if w >= 720 else 16
+        metric_value_font_size = 22 if w >= 720 else 17
         metric_unit_font_size = 9 if w >= 720 else 8
 
-        painter.setPen(QColor(245, 247, 250))
+        # Title
+        painter.setPen(QColor(30, 41, 59))
         painter.setFont(QFont("Segoe UI", title_font_size, QFont.Bold))
         painter.drawText(36, 42, "Vehicle Visualization")
 
-        painter.setFont(QFont("Segoe UI", status_font_size))
+        # Status badges
+        painter.setFont(QFont("Segoe UI", status_font_size, QFont.DemiBold))
         status = "CONNECTED" if self.connected else "DISCONNECTED"
         motion = "MOVING" if self.moving else "STABLE"
-        status_rect = QRectF(36, 50, max(120.0, w * 0.22), 24)
-        motion_rect = QRectF(status_rect.right() + 14, 50, max(90.0, w * 0.16), 24)
-        painter.setPen(QColor(115, 220, 129) if self.connected else QColor(255, 114, 114))
-        painter.drawText(status_rect, Qt.AlignLeft | Qt.AlignVCenter, status)
-        painter.setPen(QColor(255, 182, 92) if self.moving else QColor(133, 206, 255))
-        painter.drawText(motion_rect, Qt.AlignLeft | Qt.AlignVCenter, motion)
 
-        card_y = h - 138
-        card_h = 88
-        card_w = (w - 72) / 3.0
+        # Connected badge background
+        badge_y = 52
+        badge_h = 22
+        badge_radius = 11
+
+        status_color = QColor(22, 163, 74) if self.connected else QColor(220, 38, 38)
+        status_bg = QColor(status_color.red(), status_color.green(), status_color.blue(), 30)
+        status_w = max(110, len(status) * 10 + 24)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(status_bg)
+        painter.drawRoundedRect(QRectF(36, badge_y, status_w, badge_h), badge_radius, badge_radius)
+        painter.setPen(status_color)
+        painter.drawText(QRectF(36, badge_y, status_w, badge_h), Qt.AlignCenter, status)
+
+        motion_color = QColor(234, 88, 12) if self.moving else QColor(37, 99, 235)
+        motion_bg = QColor(motion_color.red(), motion_color.green(), motion_color.blue(), 25)
+        motion_w = max(90, len(motion) * 10 + 24)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(motion_bg)
+        painter.drawRoundedRect(QRectF(36 + status_w + 10, badge_y, motion_w, badge_h), badge_radius, badge_radius)
+        painter.setPen(motion_color)
+        painter.drawText(QRectF(36 + status_w + 10, badge_y, motion_w, badge_h), Qt.AlignCenter, motion)
+
+        # Metric cards
+        card_y = h - 142
+        card_h = 92
+        card_w = (w - 80) / 3.0
         metrics = [
-            ("Roll", self.roll_deg, "deg"),
-            ("Pitch", self.pitch_deg, "deg"),
-            ("Rate", self.sample_rate_hz, "Hz"),
+            ("Roll", self.roll_deg, "deg", QColor(124, 58, 237)),
+            ("Pitch", self.pitch_deg, "deg", QColor(37, 99, 235)),
+            ("Rate", self.sample_rate_hz, "Hz", QColor(5, 150, 105)),
         ]
 
-        for index, (label, value, unit) in enumerate(metrics):
-            left = 24 + index * (card_w + 12)
+        for index, (label, value, unit, accent) in enumerate(metrics):
+            left = 28 + index * (card_w + 12)
             rect = QRectF(left, card_y, card_w, card_h)
-            painter.setPen(QPen(QColor(54, 65, 84), 1))
-            painter.setBrush(QColor(18, 24, 34, 220))
-            painter.drawRoundedRect(rect, 18, 18)
-            painter.setPen(QColor(133, 149, 173))
-            painter.setFont(QFont("Segoe UI", metric_unit_font_size))
-            painter.drawText(QRectF(rect.left() + 16, rect.top() + 10, rect.width() - 32, 18), Qt.AlignLeft | Qt.AlignVCenter, label)
-            painter.setPen(QColor(247, 250, 255))
+
+            # Card background — white with subtle shadow effect
+            card_grad = QLinearGradient(rect.left(), rect.top(), rect.left(), rect.bottom())
+            card_grad.setColorAt(0.0, QColor(255, 255, 255, 240))
+            card_grad.setColorAt(1.0, QColor(248, 250, 252, 240))
+            painter.setBrush(QBrush(card_grad))
+            painter.setPen(QPen(QColor(203, 213, 225), 1))
+            painter.drawRoundedRect(rect, 14, 14)
+
+            # Accent top line
+            painter.setPen(QPen(accent, 2))
+            painter.drawLine(
+                int(rect.left() + 14), int(rect.top() + 1),
+                int(rect.right() - 14), int(rect.top() + 1)
+            )
+
+            # Label
+            painter.setPen(accent)
+            painter.setFont(QFont("Segoe UI", metric_unit_font_size, QFont.DemiBold))
+            painter.drawText(QRectF(rect.left() + 16, rect.top() + 12, rect.width() - 32, 18),
+                             Qt.AlignLeft | Qt.AlignVCenter, label.upper())
+
+            # Value
+            painter.setPen(QColor(15, 23, 42))
             painter.setFont(QFont("Segoe UI", metric_value_font_size, QFont.Bold))
-            value_rect = QRectF(rect.left() + 16, rect.top() + 28, rect.width() - 64, 32)
+            value_rect = QRectF(rect.left() + 16, rect.top() + 34, rect.width() - 64, 36)
             painter.drawText(value_rect, Qt.AlignLeft | Qt.AlignVCenter, f"{value:.1f}")
-            painter.setPen(QColor(133, 149, 173))
+
+            # Unit
+            painter.setPen(QColor(100, 116, 139))
             painter.setFont(QFont("Segoe UI", metric_unit_font_size))
-            unit_rect = QRectF(rect.right() - 44, rect.top() + 34, 28, 20)
+            unit_rect = QRectF(rect.right() - 48, rect.top() + 40, 32, 22)
             painter.drawText(unit_rect, Qt.AlignRight | Qt.AlignVCenter, unit)
 
 
@@ -192,6 +551,12 @@ class CsvLogger:
         self.file = None
         self.writer = None
         self.active = False
+
+
+def _styled_value_label():
+    lbl = QLabel("0.00")
+    lbl.setStyleSheet("color: #1e293b; font-weight: 600; font-size: 13px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;")
+    return lbl
 
 
 class ImuGui(QWidget):
@@ -253,6 +618,8 @@ class ImuGui(QWidget):
 
     def init_ui(self):
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(0)
         self.setLayout(main_layout)
 
         self.tabs = QTabWidget()
@@ -261,23 +628,29 @@ class ImuGui(QWidget):
         self.imu_tab = QWidget()
         self.pathfinder_tab = PathfinderTab()
 
-        self.tabs.addTab(self.imu_tab, "IMU")
-        self.tabs.addTab(self.pathfinder_tab, "Pathfinder")
+        self.tabs.addTab(self.imu_tab, "  IMU  ")
+        self.tabs.addTab(self.pathfinder_tab, "  Pathfinder  ")
 
         tab_layout = QVBoxLayout()
+        tab_layout.setContentsMargins(8, 8, 8, 8)
+        tab_layout.setSpacing(10)
         self.imu_tab.setLayout(tab_layout)
 
         self.robot_visual = RobotVisualizationWidget()
         tab_layout.addWidget(self.robot_visual)
 
+        # ── Bluetooth Connection ──
         self.port_combo = QComboBox()
         self.port_combo.setEditable(True)
         self.port_combo.setInsertPolicy(QComboBox.NoInsert)
         self.port_combo.setEditText(DEFAULT_DEVICE_NAME)
+        self.port_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.refresh_btn = QPushButton("Refresh Devices")
         self.connect_btn = QPushButton("Connect")
+        self.connect_btn.setObjectName("connectBtn")
         self.disconnect_btn = QPushButton("Disconnect")
+        self.disconnect_btn.setObjectName("disconnectBtn")
         self.disconnect_btn.setEnabled(False)
         self.reconnect_btn = QPushButton("Reconnect")
         self.reconnect_btn.setEnabled(False)
@@ -287,7 +660,9 @@ class ImuGui(QWidget):
         self.stop_log_btn.setEnabled(False)
 
         self.status_label = QLabel("Status: Disconnected")
+        self.status_label.setStyleSheet("font-weight: 700; color: #64748b; font-size: 13px; padding: 4px 0;")
         self.console = QTextEdit()
+        self.console.setMaximumHeight(140)
 
         self.labels = {}
         rows = [
@@ -297,7 +672,7 @@ class ImuGui(QWidget):
             "packets", "last_packet",
         ]
         for key in rows:
-            self.labels[key] = QLabel("0.00")
+            self.labels[key] = _styled_value_label()
 
         self.connection_indicator = QLabel("Disconnected")
         self.link_indicator = QLabel("No Link")
@@ -312,6 +687,7 @@ class ImuGui(QWidget):
         self.reset_orientation_btn = QPushButton("Reset Orientation")
         self.clear_plots_btn = QPushButton("Clear Plots")
         self.estop_btn = QPushButton("EMERGENCY STOP")
+        self.estop_btn.setObjectName("estopBtn")
         self.send_start_btn = QPushButton("Send START")
         self.send_cal_btn = QPushButton("Send CALIBRATE")
 
@@ -340,9 +716,14 @@ class ImuGui(QWidget):
         self.link_timeout.setValue(1.0)
         self.link_timeout.setDecimals(2)
 
+        # ── Bluetooth group ──
         bluetooth_group = QGroupBox("Bluetooth")
         bluetooth_layout = QGridLayout()
-        bluetooth_layout.addWidget(QLabel("Device"), 0, 0)
+        bluetooth_layout.setSpacing(8)
+        bluetooth_layout.setContentsMargins(12, 12, 12, 12)
+        device_label = QLabel("Device")
+        device_label.setStyleSheet("color: #8892a4; font-weight: 600;")
+        bluetooth_layout.addWidget(device_label, 0, 0)
         bluetooth_layout.addWidget(self.port_combo, 0, 1, 1, 3)
         bluetooth_layout.addWidget(self.refresh_btn, 1, 0)
         bluetooth_layout.addWidget(self.connect_btn, 1, 1)
@@ -483,19 +864,19 @@ class ImuGui(QWidget):
         self.pathfinder_tab.sync_shared_serial_controls()
         if connected:
             self.status_label.setText("Status: Connected")
-            self.status_label.setStyleSheet("font-weight: bold; color: green;")
+            self.status_label.setStyleSheet("font-weight: bold; color: #22c55e;")
             self.connection_indicator.setText("Connected")
-            self.connection_indicator.setStyleSheet("font-weight: bold; color: green;")
+            self.connection_indicator.setStyleSheet("font-weight: bold; color: #22c55e;")
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(True)
             self.reconnect_btn.setEnabled(True)
         else:
             self.status_label.setText("Status: Disconnected")
-            self.status_label.setStyleSheet("font-weight: bold; color: black;")
+            self.status_label.setStyleSheet("font-weight: bold; color: #6b7280;")
             self.connection_indicator.setText("Disconnected")
-            self.connection_indicator.setStyleSheet("font-weight: bold; color: red;")
+            self.connection_indicator.setStyleSheet("font-weight: bold; color: #ef4444;")
             self.link_indicator.setText("No Link")
-            self.link_indicator.setStyleSheet("font-weight: bold; color: red;")
+            self.link_indicator.setStyleSheet("font-weight: bold; color: #ef4444;")
             self.connect_btn.setEnabled(True)
             self.disconnect_btn.setEnabled(False)
             self.reconnect_btn.setEnabled(True)
@@ -666,7 +1047,7 @@ class ImuGui(QWidget):
         self.labels["last_packet"].setText("0.00 s ago")
 
         self.link_indicator.setText("Link Alive")
-        self.link_indicator.setStyleSheet("font-weight: bold; color: green;")
+        self.link_indicator.setStyleSheet("font-weight: bold; color: #22c55e;")
 
         self.sample_counter += 1
         self.t.append(self.sample_counter)
@@ -720,15 +1101,15 @@ class ImuGui(QWidget):
 
         if abs(acc_mag - 1.0) > 0.15 or gyro_mag > thresh:
             self.motion_indicator.setText("Moving")
-            self.motion_indicator.setStyleSheet("font-weight: bold; color: orange;")
+            self.motion_indicator.setStyleSheet("font-weight: bold; color: #fb923c;")
         else:
             self.motion_indicator.setText("Stationary")
-            self.motion_indicator.setStyleSheet("font-weight: bold; color: green;")
+            self.motion_indicator.setStyleSheet("font-weight: bold; color: #22c55e;")
 
     def check_tilt_alarm(self, roll, pitch):
         if not self.tilt_alarm_checkbox.isChecked():
             self.tilt_indicator.setText("Alarm Disabled")
-            self.tilt_indicator.setStyleSheet("font-weight: bold; color: gray;")
+            self.tilt_indicator.setStyleSheet("font-weight: bold; color: #6b7280;")
             return
 
         roll_limit = self.roll_thresh.value()
@@ -736,16 +1117,16 @@ class ImuGui(QWidget):
 
         if abs(roll) > roll_limit or abs(pitch) > pitch_limit:
             self.tilt_indicator.setText("TILT ALARM")
-            self.tilt_indicator.setStyleSheet("font-weight: bold; color: red;")
+            self.tilt_indicator.setStyleSheet("font-weight: bold; color: #ef4444;")
             if self.connection_indicator.text() == "Connected":
                 self.status_label.setText("Status: TILT ALARM")
-                self.status_label.setStyleSheet("font-weight: bold; color: red;")
+                self.status_label.setStyleSheet("font-weight: bold; color: #ef4444;")
         else:
             self.tilt_indicator.setText("No Alarm")
-            self.tilt_indicator.setStyleSheet("font-weight: bold; color: green;")
+            self.tilt_indicator.setStyleSheet("font-weight: bold; color: #22c55e;")
             if self.connection_indicator.text() == "Connected":
                 self.status_label.setText("Status: Connected")
-                self.status_label.setStyleSheet("font-weight: bold; color: green;")
+                self.status_label.setStyleSheet("font-weight: bold; color: #22c55e;")
 
     def update_plots(self):
         return
@@ -818,7 +1199,7 @@ class ImuGui(QWidget):
         self.labels["packets"].setText("0")
         self.labels["last_packet"].setText("N/A")
         self.link_indicator.setText("Waiting")
-        self.link_indicator.setStyleSheet("font-weight: bold; color: orange;")
+        self.link_indicator.setStyleSheet("font-weight: bold; color: #fb923c;")
         self.append_console("Serial link status reset")
 
     def check_link_status(self):
@@ -828,7 +1209,7 @@ class ImuGui(QWidget):
 
         if self.last_packet_time is None:
             self.link_indicator.setText("Waiting")
-            self.link_indicator.setStyleSheet("font-weight: bold; color: orange;")
+            self.link_indicator.setStyleSheet("font-weight: bold; color: #fb923c;")
             self.labels["last_packet"].setText("No data")
             return
 
@@ -837,16 +1218,16 @@ class ImuGui(QWidget):
 
         if age > self.link_timeout.value():
             self.link_indicator.setText("Link Lost")
-            self.link_indicator.setStyleSheet("font-weight: bold; color: red;")
+            self.link_indicator.setStyleSheet("font-weight: bold; color: #ef4444;")
             if self.connection_indicator.text() == "Connected":
                 self.status_label.setText("Status: Link Lost")
-                self.status_label.setStyleSheet("font-weight: bold; color: red;")
+                self.status_label.setStyleSheet("font-weight: bold; color: #ef4444;")
         else:
             self.link_indicator.setText("Link Alive")
-            self.link_indicator.setStyleSheet("font-weight: bold; color: green;")
+            self.link_indicator.setStyleSheet("font-weight: bold; color: #22c55e;")
             if self.tilt_indicator.text() != "TILT ALARM" and self.connection_indicator.text() == "Connected":
                 self.status_label.setText("Status: Connected")
-                self.status_label.setStyleSheet("font-weight: bold; color: green;")
+                self.status_label.setStyleSheet("font-weight: bold; color: #22c55e;")
 
     def send_serial_command(self, cmd):
         if self.worker is None:
@@ -873,6 +1254,7 @@ class ImuGui(QWidget):
 
 def main():
     app = QApplication(sys.argv)
+    app.setStyleSheet(LIGHT_STYLESHEET)
     window = ImuGui()
     window.show()
     sys.exit(app.exec_())

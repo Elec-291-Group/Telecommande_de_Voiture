@@ -12,6 +12,9 @@ typedef enum {
     LCD_S7,      // Pause
     LCD_S8,      // Ready (Pathfind)
     LCD_S9,      // Running (Pathfind)
+    LCD_S10,     // Ready to IR TX (BT path loaded)
+    LCD_S11,     // Running (Path via BT)
+    LCD_S12,     // Waypoints received (IR ACK from STM32)
     LCD_NUM_STATES
 } lcd_state_t;
 
@@ -23,5 +26,6 @@ extern unsigned char  active_path;    // locked in at start: 0=path1, 1=path2, 2
 
 void LCD_FSM_init(void);
 void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte);
+void LCD_FSM_pause(lcd_state_t from_state); /* call before setting lcd_state=S7 */
 
 #endif

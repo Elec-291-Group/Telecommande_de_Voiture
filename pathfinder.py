@@ -24,7 +24,7 @@ class GridCanvas(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(900, 700)
+        self.setMinimumSize(600, 600)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
 
@@ -326,6 +326,12 @@ class PathfinderTab(QWidget):
 
         left_panel = QFrame()
         left_panel.setFrameShape(QFrame.StyledPanel)
+        left_panel.setStyleSheet("""
+            QLabel { font-size: 15px; }
+            QCheckBox { font-size: 15px; }
+            QDoubleSpinBox { font-size: 15px; }
+            QComboBox { font-size: 15px; }
+        """)
         left_layout = QVBoxLayout(left_panel)
 
         conn_layout = QGridLayout()
@@ -416,8 +422,9 @@ class PathfinderTab(QWidget):
 
         self.canvas = GridCanvas()
 
-        root.addWidget(left_panel, 0)
-        root.addWidget(self.canvas, 1)
+        left_panel.setMinimumWidth(340)
+        root.addWidget(left_panel, 2)
+        root.addWidget(self.canvas, 3)
 
         self.refresh_btn.clicked.connect(self.refresh_ports)
         self.connect_btn.clicked.connect(self.connect_serial)
