@@ -279,7 +279,9 @@ class GridCanvas(QWidget):
         txt = f"Mouse: X={snap_x} cm   Y={snap_y} cm"
         painter.setPen(QColor(220, 220, 220))
         painter.setFont(QFont("Consolas", 10))
-        painter.drawText(12, self.height() - 12, txt)
+        fm = painter.fontMetrics()
+        tw = fm.horizontalAdvance(txt)
+        painter.drawText(self.width() - tw - 12, self.height() - 12, txt)
 
 
 class PathfinderTab(QWidget):
@@ -327,10 +329,10 @@ class PathfinderTab(QWidget):
         left_panel = QFrame()
         left_panel.setFrameShape(QFrame.StyledPanel)
         left_panel.setStyleSheet("""
-            QLabel { font-size: 15px; }
-            QCheckBox { font-size: 15px; }
-            QDoubleSpinBox { font-size: 15px; }
-            QComboBox { font-size: 15px; }
+            QLabel { font-size: 20px; }
+            QCheckBox { font-size: 20px; }
+            QDoubleSpinBox { font-size: 20px; }
+            QComboBox { font-size: 20px; }
         """)
         left_layout = QVBoxLayout(left_panel)
 
@@ -404,27 +406,33 @@ class PathfinderTab(QWidget):
         left_layout.addSpacing(8)
         left_layout.addLayout(settings)
 
-        pose_layout = QGridLayout()
+        left_layout.addStretch()
+
+        self.canvas = GridCanvas()
+
         self.pose_x_label = QLabel("X: 0.0 cm")
         self.pose_y_label = QLabel("Y: 0.0 cm")
         self.pose_heading_label = QLabel("Heading: 0.0 deg")
         self.path_count_label = QLabel("Waypoints: 0")
         self.status_label = QLabel("Status: Idle")
 
-        pose_layout.addWidget(self.pose_x_label, 0, 0)
-        pose_layout.addWidget(self.pose_y_label, 1, 0)
-        pose_layout.addWidget(self.pose_heading_label, 2, 0)
-        pose_layout.addWidget(self.path_count_label, 3, 0)
-        pose_layout.addWidget(self.status_label, 4, 0)
+        pose_bar = QHBoxLayout()
+        pose_bar.setSpacing(20)
+        pose_bar.addStretch()
+        for lbl in (self.pose_x_label, self.pose_y_label,
+                    self.pose_heading_label, self.path_count_label,
+                    self.status_label):
+            lbl.setStyleSheet("font-size: 14px;")
+            pose_bar.addWidget(lbl)
 
-        left_layout.addSpacing(8)
-        left_layout.addLayout(pose_layout)
-
-        self.canvas = GridCanvas()
+        right_panel = QVBoxLayout()
+        right_panel.setSpacing(6)
+        right_panel.addWidget(self.canvas)
+        right_panel.addLayout(pose_bar)
 
         left_panel.setMinimumWidth(340)
         root.addWidget(left_panel, 2)
-        root.addWidget(self.canvas, 3)
+        root.addLayout(right_panel, 3)
 
         self.refresh_btn.clicked.connect(self.refresh_ports)
         self.connect_btn.clicked.connect(self.connect_serial)

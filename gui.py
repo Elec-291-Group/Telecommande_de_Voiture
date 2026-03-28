@@ -31,7 +31,7 @@ QWidget {
     background-color: #f8f9fb;
     color: #1e293b;
     font-family: 'Segoe UI', 'Inter', 'Helvetica Neue', sans-serif;
-    font-size: 13px;
+    font-size: 22px;
 }
 
 /* ── Tab widget ── */
@@ -46,12 +46,12 @@ QTabBar::tab {
     color: #64748b;
     border: 1px solid #e2e8f0;
     border-bottom: none;
-    padding: 10px 28px;
+    padding: 14px 40px;
     margin-right: 2px;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
     font-weight: 600;
-    font-size: 13px;
+    font-size: 20px;
 }
 QTabBar::tab:selected {
     background: #ffffff;
@@ -71,7 +71,7 @@ QGroupBox {
     margin-top: 18px;
     padding: 18px 14px 12px 14px;
     font-weight: 700;
-    font-size: 13px;
+    font-size: 22px;
     color: #475569;
 }
 QGroupBox::title {
@@ -82,7 +82,7 @@ QGroupBox::title {
     background: #eef2ff;
     border-radius: 4px;
     color: #2563eb;
-    font-size: 11px;
+    font-size: 18px;
     letter-spacing: 1px;
     text-transform: uppercase;
 }
@@ -94,10 +94,10 @@ QPushButton {
     color: #334155;
     border: 1px solid #cbd5e1;
     border-radius: 7px;
-    padding: 8px 18px;
+    padding: 14px 24px;
     font-weight: 600;
-    font-size: 14px;
-    min-height: 22px;
+    font-size: 20px;
+    min-height: 29px;
 }
 QPushButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -155,9 +155,9 @@ QPushButton#estopBtn {
     color: #ffffff;
     border: 2px solid #dc2626;
     border-radius: 8px;
-    font-size: 16px;
+    font-size: 22px;
     font-weight: 800;
-    padding: 10px;
+    padding: 14px;
     letter-spacing: 1px;
 }
 QPushButton#estopBtn:hover {
@@ -172,8 +172,8 @@ QComboBox {
     border-radius: 7px;
     padding: 7px 12px;
     color: #1e293b;
-    font-size: 13px;
-    min-height: 20px;
+    font-size: 22px;
+    min-height: 28px;
 }
 QComboBox:hover {
     border-color: #94a3b8;
@@ -206,7 +206,7 @@ QTextEdit {
     border-radius: 8px;
     padding: 10px;
     font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-    font-size: 12px;
+    font-size: 20px;
     selection-background-color: #bfdbfe;
 }
 
@@ -555,7 +555,7 @@ class CsvLogger:
 
 def _styled_value_label():
     lbl = QLabel("0.00")
-    lbl.setStyleSheet("color: #1e293b; font-weight: 600; font-size: 13px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;")
+    lbl.setStyleSheet("color: #1e293b; font-weight: 600; font-size: 22px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;")
     return lbl
 
 
@@ -564,7 +564,7 @@ class ImuGui(QWidget):
         super().__init__()
 
         self.setWindowTitle("STM32 Serial IMU Viewer")
-        self.resize(1500, 950)
+        self.resize(2000, 1250)
 
         self.worker = None
         self.logger = CsvLogger()
@@ -660,9 +660,9 @@ class ImuGui(QWidget):
         self.stop_log_btn.setEnabled(False)
 
         self.status_label = QLabel("Status: Disconnected")
-        self.status_label.setStyleSheet("font-weight: 700; color: #64748b; font-size: 13px; padding: 4px 0;")
+        self.status_label.setStyleSheet("font-weight: 700; color: #64748b; font-size: 22px; padding: 4px 0;")
         self.console = QTextEdit()
-        self.console.setMaximumHeight(140)
+        self.console.setMaximumHeight(250)
 
         self.labels = {}
         rows = [
