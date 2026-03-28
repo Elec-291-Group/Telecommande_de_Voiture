@@ -179,6 +179,8 @@ uint32_t intersection_encountered_time;
 uint8_t intersection_number = 0;
 enum intersection_directions path1[] = {Forward, Left, Left, Forward, Right, Left, Right, Stop};
 //enum intersection_directions path1[] = {Left, Left, Left, Right, Right, Left, Right, Stop};
+enum intersection_directions path2[] = {Left, Right, Left, Right, Forward, Forward, Stop};
+enum intersection_directions path3[] = {Right, Forward, Right, Left, Right, Left, Forward, Stop};
 uint8_t front_inductor_ready = 1;
 uint32_t intersection_leave_time;
 uint32_t last_intersection_turning_time;
@@ -780,7 +782,24 @@ void handle_intersection_turning(void){
   float dt_s = (HAL_GetTick() - last_intersection_turning_time) / 1000.0f;
   last_intersection_turning_time = HAL_GetTick();
   intersection_turn_current_yaw_angle = intersection_turn_current_yaw_angle + gz_dps * dt_s;
-  enum intersection_directions current_direction = path1[intersection_number-1];
+  enum intersection_directions current_direction;
+  switch(ir_path){
+    case IR_PATH_1:
+      current_direction = path1[intersection_number-1];
+      break;
+    
+    case IR_PATH_2:
+      current_direction = path2[intersection_number-1];
+      break;
+
+    case IR_PATH_3:
+      current_direction = path3[intersection_number-1];
+      break;
+    
+    default:
+      current_direction = Stop;
+      break;
+  }
   
   switch(current_direction){
     case Forward:
