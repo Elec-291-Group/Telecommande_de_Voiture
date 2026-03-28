@@ -11,13 +11,16 @@
 // ---- Public state ----
 lcd_state_t   lcd_state    = LCD_S0;
 unsigned char selected_mode = 0;   // 0=auto, 1=remote, 2=pathfind
-unsigned char selected_path = 0;   // 0=path1, 1=path2, 2=path3  (navigation cursor)
+unsigned char selected_path = 0;   // 0=path1, 1=path2, 2=path3, 3=manual
 unsigned char active_mode   = 0;   // locked in when running starts: 0=auto, 1=remote, 2=pathfind
-unsigned char active_path   = 0;   // locked in when running starts: 0=path1, 1=path2, 2=path3
+unsigned char active_path   = 0;   // locked in when running starts: 0=path1, 1=path2, 2=path3, 3=manual
+unsigned char manual_int_idx = 0;  // current intersection being configured in S17 (0-7)
+unsigned char manual_dir     = 0;  // currently selected direction in S17
 
 // ---- Internal ----
 static lcd_state_t prev_state = LCD_NUM_STATES; // force redraw on first call
-static bit s7_from_s11 = 0; // set when S11 pauses to S7, so S7 resumes to S11
+static bit s7_from_s11    = 0; // set when S11 pauses to S7, so S7 resumes to S11
+static bit s17_needs_redraw = 0; // set by LCD_FSM_s17_advance to trigger redraw
 
 // Joystick latches: must return to center before next trigger
 static bit joy_x_ready = 1;
@@ -29,6 +32,10 @@ static bit pb1_ready = 1;
 // ---- Redraw current state to LCD ----
 static void redraw(void)
 {
+    static xdata char s17_line1[17];
+    unsigned char i;
+    unsigned char n;
+
     switch (lcd_state)
     {
         case LCD_S0:
@@ -48,12 +55,10 @@ static void redraw(void)
 
         case LCD_S2:
             LCDprint("Choose Path:    ", 1, 0);
-            if (selected_path == 0)
-                LCDprint(">P1  P2  P3     ", 2, 0);
-            else if (selected_path == 1)
-                LCDprint(" P1 >P2  P3     ", 2, 0);
-            else
-                LCDprint(" P1  P2 >P3     ", 2, 0);
+            if      (selected_path == 0) LCDprint(">P1  P2  P3  Man", 2, 0);
+            else if (selected_path == 1) LCDprint(" P1 >P2  P3  Man", 2, 0);
+            else if (selected_path == 2) LCDprint(" P1  P2 >P3  Man", 2, 0);
+            else                         LCDprint(" P1  P2  P3 >Man", 2, 0);
             break;
 
         case LCD_S3:
@@ -106,6 +111,51 @@ static void redraw(void)
             LCDprint("Received        ", 2, 0);
             break;
 
+        case LCD_S13:
+            LCDprint("Field: Wait ACK ", 1, 0);
+            LCDprint("Sending setup...", 2, 0);
+            break;
+
+        case LCD_S14:
+            LCDprint("Field: Ready!   ", 1, 0);
+            LCDprint("Press START     ", 2, 0);
+            break;
+
+        case LCD_S15:
+            LCDprint("Remote: Wait ACK", 1, 0);
+            LCDprint("Sending setup...", 2, 0);
+            break;
+
+        case LCD_S16:
+            LCDprint("Remote: Ready!  ", 1, 0);
+            LCDprint("Press START     ", 2, 0);
+            break;
+
+        case LCD_S17:
+            if (manual_int_idx >= 8) {
+                LCDprint("Man All Sent    ", 1, 0);
+                LCDprint("SW to Start     ", 2, 0);
+            } else {
+                i = 0;
+                s17_line1[i++] = 'M'; s17_line1[i++] = 'a'; s17_line1[i++] = 'n';
+                s17_line1[i++] = ' ';
+                s17_line1[i++] = 'I'; s17_line1[i++] = 'n'; s17_line1[i++] = 't'; s17_line1[i++] = ':';
+                n = manual_int_idx + 1;
+                if (n >= 10) s17_line1[i++] = (char)('0' + n / 10);
+                s17_line1[i++] = (char)('0' + n % 10);
+                while (i < 16) s17_line1[i++] = ' ';
+                s17_line1[16] = '\0';
+                LCDprint(s17_line1, 1, 0);
+                switch (manual_dir) {
+                    case 0: LCDprint(">Forward        ", 2, 0); break;
+                    case 1: LCDprint(">Left           ", 2, 0); break;
+                    case 2: LCDprint(">Right          ", 2, 0); break;
+                    case 3: LCDprint(">Stop           ", 2, 0); break;
+                    default: break;
+                }
+            }
+            break;
+
         default:
             break;
     }
@@ -118,19 +168,30 @@ void LCD_FSM_pause(lcd_state_t from_state)
     lcd_state   = LCD_S7;
 }
 
+// ---- Manual intersection advance (called from main.c after sending IR) ----
+void LCD_FSM_s17_advance(void)
+{
+    if (manual_int_idx < 8)
+        manual_int_idx++;
+    manual_dir = 0;
+    s17_needs_redraw = 1;
+}
+
 // ---- Init ----
 void LCD_FSM_init(void)
 {
     lcd_state     = LCD_S0;
     prev_state    = LCD_NUM_STATES;
-    selected_mode = 0;
-    selected_path = 0;
-    active_mode   = 0;
-    active_path   = 0;
-    joy_x_ready   = 1;
-    joy_y_ready   = 1;
-    pb0_ready     = 1;
-    pb1_ready     = 1;
+    selected_mode  = 0;
+    selected_path  = 0;
+    active_mode    = 0;
+    active_path    = 0;
+    manual_int_idx = 0;
+    manual_dir     = 0;
+    joy_x_ready    = 1;
+    joy_y_ready    = 1;
+    pb0_ready      = 1;
+    pb1_ready      = 1;
 }
 
 // ---- Update — call every main loop iteration ----
@@ -184,19 +245,19 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
             break;
 
         case LCD_S2:
-            if (joy_right && selected_path < 2) { selected_path++; need_redraw = 1; }
+            if (joy_right && selected_path < 3) { selected_path++; need_redraw = 1; }
             if (joy_left  && selected_path > 0) { selected_path--; need_redraw = 1; }
             if (pb0_pressed) lcd_state = LCD_S3;
             if (joy_up)      lcd_state = LCD_S1;
             break;
 
         case LCD_S3:
-            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S5; }
+            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S13; }
             if (joy_up)      lcd_state = LCD_S2;
             break;
 
         case LCD_S4:
-            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S6; }
+            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S15; }
             if (joy_up)      lcd_state = LCD_S1;
             break;
 
@@ -231,6 +292,13 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
         case LCD_S11:
             break;
 
+        case LCD_S17:
+            if (manual_int_idx < 8) {
+                if (joy_right) { manual_dir = (manual_dir < 3) ? manual_dir + 1 : 0; need_redraw = 1; }
+                if (joy_left)  { manual_dir = (manual_dir > 0) ? manual_dir - 1 : 3; need_redraw = 1; }
+            }
+            break;
+
         default:
             break;
     }
@@ -239,8 +307,10 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
     if (lcd_state != prev_state) {
         redraw();
         prev_state = lcd_state;
-    } else if (need_redraw) {
+        s17_needs_redraw = 0;
+    } else if (need_redraw || s17_needs_redraw) {
         redraw();
+        s17_needs_redraw = 0;
     }
 
 }

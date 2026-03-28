@@ -11,7 +11,9 @@
 #include "data_buffers.h"
 #include "bluetooth.h"
 
-unsigned char crossing_action = 0;
+unsigned char crossing_action   = 0;
+static unsigned char intersection_num = 0;
+static bit           crossing_updated = 0;
 
 void InitPinADC (unsigned char portno, unsigned char pinno)
 {
@@ -94,12 +96,17 @@ void IR_RX_decode_command(const IR_Frame_t *frame)
     switch (frame->cmd)
     {
         case IR_RX_CMD_DATA_RECEIVED:
-            if (lcd_state == LCD_S10)
-                lcd_state = LCD_S12;
+            if      (lcd_state == LCD_S13) lcd_state = LCD_S14;
+            else if (lcd_state == LCD_S15) lcd_state = LCD_S16;
+            else if (lcd_state == LCD_S10) lcd_state = LCD_S12;
             break;
 
         case IR_RX_CMD_CROSSING_ACTION:
             crossing_action = (unsigned char)(frame->val & 0xFF);
+            if (lcd_state == LCD_S5) {
+                intersection_num++;
+                crossing_updated = 1;
+            }
             break;
 
         default:
@@ -107,11 +114,17 @@ void IR_RX_decode_command(const IR_Frame_t *frame)
     }
 }
 
-static bit pb_start_latch  = 1;
-static bit pb_pause_latch  = 1;
-static bit pb_reset_latch  = 1;
-static bit pbtxcmd_latch   = 1;
-static bit pbsw_s12_latch  = 1;
+static bit pb_start_latch    = 1;
+static bit pb_pause_latch    = 1;
+static bit pb_reset_latch    = 1;
+static bit pbtxcmd_latch     = 1;
+static bit pbsw_s12_latch    = 1;
+static bit pbsw_s14_latch    = 1;
+static bit pbtxcmd_s14_latch = 1;
+static bit pbsw_s16_latch    = 1;
+static bit pbtxcmd_s16_latch = 1;
+static bit pbsw_s17_latch    = 1;
+static bit pbtxcmd_s17_latch = 1;
 
 static void handle_pb_start(void)
 {
@@ -219,6 +232,131 @@ static void handle_s12_buttons(void)
     }
 }
 
+static void handle_s14_buttons(void)
+{
+    if (lcd_state != LCD_S14) { pbsw_s14_latch = 1; pbtxcmd_s14_latch = 1; return; }
+
+    /* PB_TXCMD: re-send path selection (path 1/2/3 only, not manual) */
+    if (active_path != 3) {
+        if (PB_TXCMD == 0) {
+            if (pbtxcmd_s14_latch && fsm_state == FSM_IDLE) {
+                send_ir_packet(IR_CMD_PATH, active_path, IR_ADDR);
+                while (fsm_state == FSM_IDLE);
+                while (fsm_state != FSM_IDLE);
+                pbtxcmd_s14_latch = 0;
+            }
+        } else {
+            pbtxcmd_s14_latch = 1;
+        }
+    }
+
+    if (JoyStick_SW == 0) {
+        if (pbsw_s14_latch && fsm_state == FSM_IDLE) {
+            if (active_path == 3) {
+                // Manual submode: go to intersection setup, no START yet
+                manual_int_idx = 0;
+                manual_dir     = 0;
+                lcd_state = LCD_S17;
+            } else {
+                send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+                lcd_state = LCD_S5;
+            }
+            pbsw_s14_latch = 0;
+        }
+    } else {
+        pbsw_s14_latch = 1;
+    }
+}
+
+static void handle_s16_buttons(void)
+{
+    if (lcd_state != LCD_S16) { pbsw_s16_latch = 1; pbtxcmd_s16_latch = 1; return; }
+
+    /* PB_TXCMD: re-send remote mode signal to confirm connection */
+    if (PB_TXCMD == 0) {
+        if (pbtxcmd_s16_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
+            pbtxcmd_s16_latch = 0;
+        }
+    } else {
+        pbtxcmd_s16_latch = 1;
+    }
+
+    if (JoyStick_SW == 0) {
+        if (pbsw_s16_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            lcd_state = LCD_S6;
+            pbsw_s16_latch = 0;
+        }
+    } else {
+        pbsw_s16_latch = 1;
+    }
+}
+
+static void handle_s17_buttons(void)
+{
+    if (lcd_state != LCD_S17) { pbsw_s17_latch = 1; pbtxcmd_s17_latch = 1; return; }
+
+    /* PB_TXCMD: send current intersection decision and advance */
+    if (PB_TXCMD == 0) {
+        if (pbtxcmd_s17_latch && fsm_state == FSM_IDLE && manual_int_idx < 8) {
+            send_ir_packet(
+                (uint8_t)IR_CMD_CROSSING_DECISION,
+                (uint16_t)(((uint16_t)manual_int_idx << 8) | (uint16_t)manual_dir),
+                IR_ADDR
+            );
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
+            LCD_FSM_s17_advance(); // increments manual_int_idx, resets manual_dir, triggers redraw
+            pbtxcmd_s17_latch = 0;
+        }
+    } else {
+        pbtxcmd_s17_latch = 1;
+    }
+
+    /* JoyStick_SW: all done, send START and begin running */
+    if (JoyStick_SW == 0) {
+        if (pbsw_s17_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
+            lcd_state = LCD_S5;
+            pbsw_s17_latch = 0;
+        }
+    } else {
+        pbsw_s17_latch = 1;
+    }
+}
+
+// ---- Crossing display (Auto/Field mode S5) ----
+static void update_crossing_display(void)
+{
+    static xdata char line1[17];
+    unsigned char path_num = active_path + 1; // 0-indexed → 1-3
+    unsigned char i = 0;
+
+    line1[i++] = 'P';
+    line1[i++] = (char)('0' + path_num);
+    line1[i++] = ' ';
+    line1[i++] = 'I'; line1[i++] = 'n'; line1[i++] = 't'; line1[i++] = ':';
+    if (intersection_num >= 10)
+        line1[i++] = (char)('0' + intersection_num / 10);
+    line1[i++] = (char)('0' + intersection_num % 10);
+    while (i < 16) line1[i++] = ' ';
+    line1[16] = '\0';
+    LCDprint(line1, 1, 0);
+
+    switch (crossing_action) {
+        case 0: LCDprint("Forward         ", 2, 0); break;
+        case 1: LCDprint("Left            ", 2, 0); break;
+        case 2: LCDprint("Right           ", 2, 0); break;
+        case 3: LCDprint("Stop            ", 2, 0); break;
+        default: break;
+    }
+}
+
 // ---- Main ----
 void main (){
 	static xdata float joystick_x;
@@ -260,12 +398,30 @@ void main (){
 		handle_pb_reset();
 		handle_s10_buttons();
 		handle_s12_buttons();
+		handle_s14_buttons();
+		handle_s16_buttons();
+		handle_s17_buttons();
+
+		// Update intersection display in auto mode
+		if (lcd_state == LCD_S5 && crossing_updated) {
+			crossing_updated = 0;
+			update_crossing_display();
+		}
 
 		// On transition into a running/pause state, send IR command
 		if (lcd_state != prev_lcd_state) {
-			if (lcd_state == LCD_S7) {
-				// Paused
-				send_ir_packet(IR_CMD_PAUSE, 0xFF, IR_ADDR);
+			if (lcd_state == LCD_S13) {
+				// Field setup: send mode + path to car, wait for ACK (→S14)
+				send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
+				while (fsm_state == FSM_IDLE);
+				while (fsm_state != FSM_IDLE);
+
+				send_ir_packet(IR_CMD_PATH, active_path, IR_ADDR);
+				while (fsm_state == FSM_IDLE);
+				while (fsm_state != FSM_IDLE);
+			} else if (lcd_state == LCD_S15) {
+				// Remote setup: send mode to car, wait for ACK (→S16)
+				send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
 				while (fsm_state == FSM_IDLE);
 				while (fsm_state != FSM_IDLE);
 			} else if (lcd_state == LCD_S5) {
@@ -275,35 +431,19 @@ void main (){
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 				} else {
-					// Fresh start: send mode, path, then start
-					send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
-					while (fsm_state == FSM_IDLE);
-					while (fsm_state != FSM_IDLE);
-
-					send_ir_packet(IR_CMD_PATH, active_path, IR_ADDR);
-					while (fsm_state == FSM_IDLE);
-					while (fsm_state != FSM_IDLE);
-
-					send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
-					while (fsm_state == FSM_IDLE);
-					while (fsm_state != FSM_IDLE);
+					// Fresh start from S14: reset intersection counter
+					intersection_num = 0;
+					crossing_updated = 0;
 				}
+				// fresh start: START sent by handle_s14_buttons (S14→S5)
 			} else if (lcd_state == LCD_S6) {
 				if (prev_lcd_state == LCD_S7) {
 					// Resume from pause
 					send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
-				} else {
-					// Fresh start: send mode, then start
-					send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
-					while (fsm_state == FSM_IDLE);
-					while (fsm_state != FSM_IDLE);
-
-					send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
-					while (fsm_state == FSM_IDLE);
-					while (fsm_state != FSM_IDLE);
 				}
+				// fresh start: START sent by handle_s16_buttons (S16→S6)
 			} else if (lcd_state == LCD_S9) {
 				if (prev_lcd_state == LCD_S7) {
 					// Resume from pause
