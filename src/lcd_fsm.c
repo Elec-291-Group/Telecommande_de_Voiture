@@ -167,6 +167,11 @@ static void redraw(void)
             LCDprint("Press PB0       ", 2, 0);
             break;
 
+        case LCD_S8:
+            LCDprint("Ready (Pathfind)", 1, 0);
+            LCDprint("Press PB0       ", 2, 0);
+            break;
+
         case LCD_S5:
             LCDprint("Running (Auto)  ", 1, 0);
             LCDprint("PB1: Pause      ", 2, 0);
@@ -175,6 +180,11 @@ static void redraw(void)
         case LCD_S6:
             LCDprint("Running (Remote)", 1, 0);
             LCDprint("                ", 2, 0);
+            break;
+
+        case LCD_S9:
+            LCDprint("Running (Path)  ", 1, 0);
+            LCDprint("PB1: Pause      ", 2, 0);
             break;
 
         case LCD_S7:
@@ -256,12 +266,9 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
             if (joy_right && selected_mode < 2) { selected_mode++; need_redraw = 1; }
             if (joy_left  && selected_mode > 0) { selected_mode--; need_redraw = 1; }
             if (pb0_pressed) {
-                if (selected_mode == 0)
-                    lcd_state = LCD_S2;
-                else if (selected_mode == 1)
-                    lcd_state = LCD_S4;
-                else
-                    lcd_state = LCD_S8;
+                if      (selected_mode == 0) lcd_state = LCD_S2;
+                else if (selected_mode == 1) lcd_state = LCD_S4;
+                else                         lcd_state = LCD_S8;
             }
             break;
 
@@ -295,18 +302,20 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
             if (pb1_pressed) lcd_state = LCD_S7;
             break;
 
+        case LCD_S8:
+            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S9; }
+            if (joy_up)      lcd_state = LCD_S1;
+            break;
+
         case LCD_S9:
             if (pb1_pressed) lcd_state = LCD_S7;
             break;
 
         case LCD_S7:
             if (pb0_pressed) {
-                if (selected_mode == 0)
-                    lcd_state = LCD_S5;
-                else if (selected_mode == 1)
-                    lcd_state = LCD_S6;
-                else
-                    lcd_state = LCD_S9;
+                if      (active_mode == 0) lcd_state = LCD_S5;
+                else if (active_mode == 1) lcd_state = LCD_S6;
+                else                       lcd_state = LCD_S9;
             }
             if (pb1_pressed) {
                 selected_mode = 0;
