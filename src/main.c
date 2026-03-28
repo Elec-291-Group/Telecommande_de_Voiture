@@ -120,7 +120,8 @@ static bit pb_reset_latch    = 1;
 static bit pbtxcmd_latch     = 1;
 static bit pbsw_s12_latch    = 1;
 static bit pbsw_s14_latch    = 1;
-static bit pbtxcmd_s14_latch = 1;
+static bit pbtxcmd_s13_latch = 1;
+static bit pbtxcmd_s15_latch = 1;
 static bit pbsw_s16_latch    = 1;
 static bit pbtxcmd_s16_latch = 1;
 static bit pbsw_s17_latch    = 1;
@@ -232,23 +233,46 @@ static void handle_s12_buttons(void)
     }
 }
 
+static void handle_s13_buttons(void)
+{
+    if (lcd_state != LCD_S13) { pbtxcmd_s13_latch = 1; return; }
+
+    /* PB_TXCMD: re-send MODE + PATH to car if no ACK received */
+    if (PB_TXCMD == 0) {
+        if (pbtxcmd_s13_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
+            send_ir_packet(IR_CMD_PATH, active_path + 1, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
+            pbtxcmd_s13_latch = 0;
+        }
+    } else {
+        pbtxcmd_s13_latch = 1;
+    }
+}
+
+static void handle_s15_buttons(void)
+{
+    if (lcd_state != LCD_S15) { pbtxcmd_s15_latch = 1; return; }
+
+    /* PB_TXCMD: re-send MODE to car if no ACK received */
+    if (PB_TXCMD == 0) {
+        if (pbtxcmd_s15_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
+            pbtxcmd_s15_latch = 0;
+        }
+    } else {
+        pbtxcmd_s15_latch = 1;
+    }
+}
+
 static void handle_s14_buttons(void)
 {
-    if (lcd_state != LCD_S14) { pbsw_s14_latch = 1; pbtxcmd_s14_latch = 1; return; }
-
-    /* PB_TXCMD: re-send path selection (path 1/2/3 only, not manual) */
-    if (active_path != 3) {
-        if (PB_TXCMD == 0) {
-            if (pbtxcmd_s14_latch && fsm_state == FSM_IDLE) {
-                send_ir_packet(IR_CMD_PATH, active_path, IR_ADDR);
-                while (fsm_state == FSM_IDLE);
-                while (fsm_state != FSM_IDLE);
-                pbtxcmd_s14_latch = 0;
-            }
-        } else {
-            pbtxcmd_s14_latch = 1;
-        }
-    }
+    if (lcd_state != LCD_S14) { pbsw_s14_latch = 1; return; }
 
     if (JoyStick_SW == 0) {
         if (pbsw_s14_latch && fsm_state == FSM_IDLE) {
@@ -396,6 +420,8 @@ void main (){
 		handle_pb_start();
 		handle_pb_pause();
 		handle_pb_reset();
+		handle_s13_buttons();
+		handle_s15_buttons();
 		handle_s10_buttons();
 		handle_s12_buttons();
 		handle_s14_buttons();
@@ -416,7 +442,7 @@ void main (){
 				while (fsm_state == FSM_IDLE);
 				while (fsm_state != FSM_IDLE);
 
-				send_ir_packet(IR_CMD_PATH, active_path, IR_ADDR);
+				send_ir_packet(IR_CMD_PATH, active_path + 1, IR_ADDR);
 				while (fsm_state == FSM_IDLE);
 				while (fsm_state != FSM_IDLE);
 			} else if (lcd_state == LCD_S15) {
