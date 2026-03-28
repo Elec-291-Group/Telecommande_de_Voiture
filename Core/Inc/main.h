@@ -75,6 +75,7 @@ enum path_tracking_states {
   Intersection_encountered,
   Intersection_compensation,
   Intersection_turning,
+  Intersection_turn_settle,
   Intersection_stop,
 };
 
