@@ -4,11 +4,7 @@ import time
 import json
 from pathlib import Path
 
-POSE_AXIS_SIGN_X = 1.0
-POSE_AXIS_SIGN_Y = -1.0
-POSE_AXIS_SIGN_HEADING = -1.0
-
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPointF
+from PyQt5.QtCore import Qt, pyqtSignal, QPointF
 from PyQt5.QtGui import QPainter, QPen, QColor, QBrush, QFont, QPolygonF
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
@@ -24,7 +20,6 @@ from ble_receiver import BleWorker, DEFAULT_DEVICE_NAME, scan_ble_devices
 
 
 class GridCanvas(QWidget):
-    point_added = pyqtSignal(float, float)
     path_changed = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -36,6 +31,10 @@ class GridCanvas(QWidget):
         self.grid_spacing_px = 40
         self.cm_per_grid = 10.0
         self.px_per_cm = self.grid_spacing_px / self.cm_per_grid
+        self.plot_margin_left = 48
+        self.plot_margin_right = 20
+        self.plot_margin_top = 20
+        self.plot_margin_bottom = 40
 
         self.origin_set = False
         self.origin_world_x = 0.0
@@ -98,24 +97,28 @@ class GridCanvas(QWidget):
         self.update()
 
     def world_to_screen(self, x_cm, y_cm):
-        cx = self.width() / 2.0
-        cy = self.height() / 2.0
-        sx = cx + (x_cm - self.origin_world_x) * self.px_per_cm
-        sy = cy - (y_cm - self.origin_world_y) * self.px_per_cm
+        sx = self.plot_margin_left + (x_cm - self.origin_world_x) * self.px_per_cm
+        sy = self.height() - self.plot_margin_bottom - (
+            (y_cm - self.origin_world_y) * self.px_per_cm
+        )
         return sx, sy
 
     def screen_to_world(self, sx, sy):
-        cx = self.width() / 2.0
-        cy = self.height() / 2.0
-        x_cm = self.origin_world_x + (sx - cx) / self.px_per_cm
-        y_cm = self.origin_world_y + (cy - sy) / self.px_per_cm
+        usable_x = max(0.0, sx - self.plot_margin_left)
+        usable_y = max(0.0, (self.height() - self.plot_margin_bottom) - sy)
+        x_cm = self.origin_world_x + usable_x / self.px_per_cm
+        y_cm = self.origin_world_y + usable_y / self.px_per_cm
         return x_cm, y_cm
+
+    @staticmethod
+    def snap_waypoint(x_cm, y_cm):
+        return int(round(x_cm)), int(round(y_cm))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.drawing_enabled:
             x_cm, y_cm = self.screen_to_world(event.x(), event.y())
+            x_cm, y_cm = self.snap_waypoint(x_cm, y_cm)
             self.path_points.append((x_cm, y_cm))
-            self.point_added.emit(x_cm, y_cm)
             self.path_changed.emit()
             self.update()
 
@@ -145,38 +148,40 @@ class GridCanvas(QWidget):
         pen_minor = QPen(QColor(35, 40, 60), 1)
         pen_major = QPen(QColor(55, 60, 90), 1)
 
-        w = self.width()
-        h = self.height()
-        cx = w / 2.0
-        cy = h / 2.0
+        left = self.plot_margin_left
+        right = self.width() - self.plot_margin_right
+        top = self.plot_margin_top
+        bottom = self.height() - self.plot_margin_bottom
         spacing = self.grid_spacing_px
 
-        num_v = int(w / spacing) + 3
-        num_h = int(h / spacing) + 3
+        num_v = int(max(0, right - left) / spacing) + 1
+        num_h = int(max(0, bottom - top) / spacing) + 1
 
-        for i in range(-num_v, num_v + 1):
-            x = cx + i * spacing
+        for i in range(num_v + 1):
+            x = left + i * spacing
             painter.setPen(pen_major if i % 5 == 0 else pen_minor)
-            painter.drawLine(int(x), 0, int(x), h)
+            painter.drawLine(int(x), int(top), int(x), int(bottom))
 
-        for j in range(-num_h, num_h + 1):
-            y = cy + j * spacing
+        for j in range(num_h + 1):
+            y = bottom - j * spacing
             painter.setPen(pen_major if j % 5 == 0 else pen_minor)
-            painter.drawLine(0, int(y), w, int(y))
+            painter.drawLine(int(left), int(y), int(right), int(y))
 
     def draw_axes(self, painter):
-        cx = self.width() / 2.0
-        cy = self.height() / 2.0
+        left = self.plot_margin_left
+        right = self.width() - self.plot_margin_right
+        top = self.plot_margin_top
+        bottom = self.height() - self.plot_margin_bottom
 
         painter.setPen(QPen(QColor(120, 120, 150), 1))
-        painter.drawLine(0, int(cy), self.width(), int(cy))
-        painter.drawLine(int(cx), 0, int(cx), self.height())
+        painter.drawLine(int(left), int(bottom), int(right), int(bottom))
+        painter.drawLine(int(left), int(top), int(left), int(bottom))
 
         if self.show_labels:
             painter.setPen(QColor(220, 220, 220))
             painter.setFont(QFont("Arial", 11))
-            painter.drawText(int(cx + 8), 18, "+Y")
-            painter.drawText(self.width() - 28, int(cy - 8), "+X")
+            painter.drawText(int(left + 8), int(top + 16), "+Y")
+            painter.drawText(int(right - 28), int(bottom - 8), "+X")
 
     def draw_origin(self, painter):
         if not self.origin_set:
@@ -215,7 +220,7 @@ class GridCanvas(QWidget):
             if self.show_labels:
                 painter.setPen(QColor(210, 240, 255))
                 painter.setFont(QFont("Arial", 11, QFont.Bold))
-                painter.drawText(int(sx + 8), int(sy - 8), f"P{i + 1}")
+                painter.drawText(int(sx + 8), int(sy - 8), f"P{i + 1} ({x}, {y})")
 
             prev = (sx, sy)
 
@@ -270,7 +275,8 @@ class GridCanvas(QWidget):
         if self.mouse_world is None:
             return
         x, y = self.mouse_world
-        txt = f"Mouse: X={x:.1f} cm   Y={y:.1f} cm"
+        snap_x, snap_y = self.snap_waypoint(x, y)
+        txt = f"Mouse: X={snap_x} cm   Y={snap_y} cm"
         painter.setPen(QColor(220, 220, 220))
         painter.setFont(QFont("Consolas", 10))
         painter.drawText(12, self.height() - 12, txt)
@@ -283,9 +289,7 @@ class PathfinderTab(QWidget):
         self.bt_thread = None
         self.shared_serial_host = None
 
-        self.last_good_pose = (0.0, 0.0, 0.0)
         self.last_path_ack = None
-        self.last_track_ack = None
         self.last_rx_cmd = None
 
         self.build_ui()
@@ -300,21 +304,21 @@ class PathfinderTab(QWidget):
 
     def transform_inbound_pose(self, x, y, h):
         return (
-            x * POSE_AXIS_SIGN_X,
-            y * POSE_AXIS_SIGN_Y,
-            self.wrap_angle_deg(h * POSE_AXIS_SIGN_HEADING),
+            x,
+            y,
+            self.wrap_angle_deg(h),
         )
 
     def transform_inbound_origin(self, x, y):
         return (
-            x * POSE_AXIS_SIGN_X,
-            y * POSE_AXIS_SIGN_Y,
+            x,
+            y,
         )
 
     def transform_outbound_waypoint(self, x, y):
         return (
-            x * POSE_AXIS_SIGN_X,
-            y * POSE_AXIS_SIGN_Y,
+            int(round(x)),
+            int(round(y)),
         )
 
     def build_ui(self):
@@ -435,7 +439,6 @@ class PathfinderTab(QWidget):
         self.show_labels_cb.toggled.connect(self.on_labels_toggle)
         self.show_heading_cb.toggled.connect(self.on_heading_toggle)
 
-        self.canvas.point_added.connect(self.on_point_added)
         self.canvas.path_changed.connect(self.update_path_count)
 
         self.refresh_ports()
@@ -463,9 +466,6 @@ class PathfinderTab(QWidget):
         if current_text:
             self.port_combo.setCurrentText(current_text)
         self.port_combo.blockSignals(False)
-
-    def log(self, text):
-        _ = text
 
     def refresh_ports(self):
         if self.shared_serial_host is not None:
@@ -503,7 +503,6 @@ class PathfinderTab(QWidget):
             return
 
         if self.bt_thread is not None:
-            self.log("Already connected")
             return
 
         device_address = self.port_combo.currentData()
@@ -551,13 +550,6 @@ class PathfinderTab(QWidget):
             if len(parts) >= 2:
                 self.last_path_ack = parts[1].upper()
                 self.status_label.setText(f"Status: Path {parts[1].lower()}")
-            return
-
-        if tag == "TRACK_ACK":
-            if len(parts) >= 2:
-                self.last_track_ack = parts[1].upper()
-                state = parts[1].replace("_", " ").title()
-                self.status_label.setText(f"Status: Tracking {state}")
             return
 
         if tag == "RX_CMD" and len(parts) >= 2:
@@ -618,7 +610,6 @@ class PathfinderTab(QWidget):
                 return
 
         self.canvas.set_robot_pose(x, y, h)
-        self.last_good_pose = (x, y, h)
         self.update_pose_labels()
 
     def set_origin_from_robot(self):
@@ -644,9 +635,6 @@ class PathfinderTab(QWidget):
         self.canvas.show_heading_vector = checked
         self.canvas.update()
 
-    def on_point_added(self, x, y):
-        _ = (x, y)
-
     def update_path_count(self):
         self.path_count_label.setText(f"Waypoints: {len(self.canvas.path_points)}")
 
@@ -661,8 +649,8 @@ class PathfinderTab(QWidget):
         return int(text) / 100.0
 
     @staticmethod
-    def encode_scaled_int(value):
-        return str(int(round(value * 100.0)))
+    def encode_int(value):
+        return str(int(value))
 
     def send_command(self, cmd):
         if self.shared_serial_host is not None:
@@ -729,7 +717,8 @@ class PathfinderTab(QWidget):
             QMessageBox.warning(self, "No Path", "Draw a path first.")
             return
 
-        if self.bt_thread is None:
+        if self.shared_serial_host is None and self.bt_thread is None:
+            QMessageBox.warning(self, "Not Connected", "Connect Bluetooth before sending the path.")
             return
 
         self.last_path_ack = None
@@ -739,7 +728,10 @@ class PathfinderTab(QWidget):
 
         for i, (x, y) in enumerate(self.canvas.path_points):
             tx, ty = self.transform_outbound_waypoint(x, y)
-            cmd = f"WPT,{i},{self.encode_scaled_int(tx)},{self.encode_scaled_int(ty)}"
+            cmd = (
+                f"WPT,{i},"
+                f"{self.encode_int(tx)},{self.encode_int(ty)}"
+            )
             if not self.send_waypoint_with_retry(cmd):
                 return
 
