@@ -29,13 +29,13 @@
 #define RX0_MASK    (RX0_SIZE - 1u)
 
 static xdata char    tx0_buf[TX0_SIZE];
-static unsigned char tx0_head = 0;
-static unsigned char tx0_tail = 0;
+static unsigned char xdata tx0_head = 0;
+static unsigned char xdata tx0_tail = 0;
 static bit           tx0_busy = 0;
 
 static xdata char    rx0_buf[RX0_SIZE];
-static unsigned char rx0_head = 0;
-static unsigned char rx0_tail = 0;
+static unsigned char xdata rx0_head = 0;
+static unsigned char xdata rx0_tail = 0;
 
 void UART0_init(void)
 {
@@ -136,13 +136,13 @@ char UART0_read(void)
 #define SCON1_TI_BIT    0x02u               /* transmit interrupt flag */
 
 static xdata char    tx1_buf[TX1_SIZE];
-static unsigned char tx1_head = 0;
-static unsigned char tx1_tail = 0;
+static unsigned char xdata tx1_head = 0;
+static unsigned char xdata tx1_tail = 0;
 static bit           tx1_busy = 0;
 
 static xdata char    rx1_buf[RX1_SIZE];
-static unsigned char rx1_head = 0;
-static unsigned char rx1_tail = 0;
+static unsigned char xdata rx1_head = 0;
+static unsigned char xdata rx1_tail = 0;
 
 void UART1_init(void)
 {
