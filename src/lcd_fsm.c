@@ -11,9 +11,9 @@
 
 // ---- Public state ----
 lcd_state_t   lcd_state    = LCD_S0;
-unsigned char selected_mode = 0;   // 0=auto, 1=remote  (navigation cursor)
+unsigned char selected_mode = 0;   // 0=field tracking, 1=remote, 2=path tracking  (navigation cursor)
 unsigned char selected_path = 0;   // 0=path1, 1=path2, 2=path3  (navigation cursor)
-unsigned char active_mode   = 0;   // locked in when running starts: 0=auto, 1=remote
+unsigned char active_mode   = 0;   // locked in when running starts: 0=field tracking, 1=remote, 2=path tracking
 unsigned char active_path   = 0;   // locked in when running starts: 0=path1, 1=path2, 2=path3
 
 // ---- Internal ----
@@ -40,11 +40,11 @@ static void redraw(void)
         case LCD_S1:
             LCDprint("Choose Mode:    ", 1, 0);
             if (selected_mode == 0)
-                LCDprint(">Auto Rem  Path ", 2, 0);
+                LCDprint(">Fld  Rem  Path ", 2, 0);
             else if (selected_mode == 1)
-                LCDprint(" Auto>Rem  Path ", 2, 0);
+                LCDprint(" Fld >Rem  Path ", 2, 0);
             else
-                LCDprint(" Auto Rem >Path ", 2, 0);
+                LCDprint(" Fld  Rem >Path ", 2, 0);
             break;
 
         case LCD_S2:
@@ -58,7 +58,7 @@ static void redraw(void)
             break;
 
         case LCD_S3:
-            LCDprint("Ready (Auto)    ", 1, 0);
+            LCDprint("Ready (Field)   ", 1, 0);
             LCDprint("Press PB0       ", 2, 0);
             break;
 
@@ -73,7 +73,7 @@ static void redraw(void)
             break;
 
         case LCD_S5:
-            LCDprint("Running (Auto)  ", 1, 0);
+            LCDprint("Running (Field) ", 1, 0);
             LCDprint("PB1: Pause      ", 2, 0);
             break;
 

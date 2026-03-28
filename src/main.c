@@ -99,7 +99,7 @@ void main (){
 
 	printf("start\r\n");
 	while(1){
-		IR_debug();
+		//IR_debug();
 
 		joystick_x = Volts_at_Pin(JOYSTICK_X);
 		joystick_y = Volts_at_Pin(JOYSTICK_Y);
@@ -113,58 +113,58 @@ void main (){
 		if (lcd_state != prev_lcd_state) {
 			if (lcd_state == LCD_S7) {
 				// Paused
-				IR_Send(IR_CMD_PAUSE, 0xFF, IR_ADDR);
+				send_ir_packet(IR_CMD_PAUSE, 0xFF, IR_ADDR);
 				while (fsm_state == FSM_IDLE);
 				while (fsm_state != FSM_IDLE);
 			} else if (lcd_state == LCD_S5) {
 				if (prev_lcd_state == LCD_S7) {
 					// Resume from pause
-					IR_Send(IR_CMD_RESUME, 0xFF, IR_ADDR);
+					send_ir_packet(IR_CMD_RESUME, 0xFF, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 				} else {
 					// Fresh start: send mode, path, then start
-					IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+					send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 
-					IR_Send(IR_CMD_PATH, active_path, IR_ADDR);
+					send_ir_packet(IR_CMD_PATH, active_path, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 
-					IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+					send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 				}
 			} else if (lcd_state == LCD_S6) {
 				if (prev_lcd_state == LCD_S7) {
 					// Resume from pause
-					IR_Send(IR_CMD_RESUME, 0xFF, IR_ADDR);
+					send_ir_packet(IR_CMD_RESUME, 0xFF, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 				} else {
 					// Fresh start: send mode, then start
-					IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+					send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 
-					IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+					send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 				}
 			} else if (lcd_state == LCD_S9) {
 				if (prev_lcd_state == LCD_S7) {
 					// Resume from pause
-					IR_Send(IR_CMD_RESUME, 0xFF, IR_ADDR);
+					send_ir_packet(IR_CMD_RESUME, 0xFF, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 				} else {
 					// Fresh start: send mode, then start
-					IR_Send(IR_CMD_MODE, active_mode, IR_ADDR);
+					send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 
-					IR_Send(IR_CMD_START, 0xFF, IR_ADDR);
+					send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
 					while (fsm_state == FSM_IDLE);
 					while (fsm_state != FSM_IDLE);
 				}
@@ -174,11 +174,11 @@ void main (){
 
 		// Send joystick only in remote mode
 		if (lcd_state == LCD_S6) {
-			IR_Send(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
+			send_ir_packet(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
 			while (fsm_state == FSM_IDLE);
 			while (fsm_state != FSM_IDLE);
 
-			IR_Send(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
+			send_ir_packet(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
 			while (fsm_state == FSM_IDLE);
 			while (fsm_state != FSM_IDLE);
 		}
