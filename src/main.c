@@ -93,7 +93,7 @@ void IR_RX_decode_command(const IR_Frame_t *frame)
 {
     switch (frame->cmd)
     {
-        case IR_RX_CMD_PATH_ARRIVED:
+        case IR_RX_CMD_DATA_RECEIVED:
             if (lcd_state == LCD_S10)
                 lcd_state = LCD_S12;
             break;
