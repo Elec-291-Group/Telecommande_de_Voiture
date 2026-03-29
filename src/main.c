@@ -73,10 +73,21 @@ static void uart0_send_hex_byte(unsigned char v)
     UART0_send_char((char)(n < 10u ? '0' + n : 'A' + n - 10u));
 }
 
+static void IR_TX_debug_print(unsigned char cmd, unsigned int val)
+{
+    UART0_send_string("TX cmd=");
+    uart0_send_hex_byte(cmd);
+    UART0_send_string(" val=0x");
+    uart0_send_hex_byte((unsigned char)(val >> 8));
+    uart0_send_hex_byte((unsigned char)(val & 0xFFu));
+    UART0_send_string("\r\n");
+}
+
 void IR_debug(void)
 {
     IR_Frame_t f;
     send_ir_packet((uint8_t)IR_CMD_START, (uint16_t)0x0000, (uint8_t)IR_ADDR1);
+    IR_TX_debug_print(IR_CMD_START, 0x0000);
     while (IR_RX_get(&f)) {
         if (f.addr == IR_ADDR2) {
             UART0_send_string("cmd=");
@@ -148,12 +159,10 @@ static lcd_state_t s7_resume_state = LCD_S0; // which running state S7 should re
 
 static void handle_pb_start(void)
 {
-    /* S13/S14/S15 handle PB_START themselves */
-    if (lcd_state == LCD_S13 || lcd_state == LCD_S14 || lcd_state == LCD_S15) return;
-
     if (PB_START == 0) {
         if (pb_start_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_START, 0x0000);
             pb_start_latch = 0;
         }
     } else {
@@ -166,6 +175,7 @@ static void handle_pb_pause(void)
     if (PB_PAUSE == 0) {
         if (pb_pause_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_PAUSE, 0x0000, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_PAUSE, 0x0000);
             if (lcd_state == LCD_S5  || lcd_state == LCD_S6 ||
                 lcd_state == LCD_S9  || lcd_state == LCD_S11) {
                 s7_resume_state = lcd_state;
@@ -183,6 +193,7 @@ static void handle_pb_reset(void)
     if (PB_RESET == 0) {
         if (pb_reset_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_RESET, 0x0000, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_RESET, 0x0000);
             lcd_state = LCD_S0;
             pb_reset_latch = 0;
         }
@@ -218,9 +229,11 @@ static void handle_s13_buttons(void)
     if (PB_TXCMD == 0) {
         if (pbtxcmd_s13_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_MODE, active_mode);
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             send_ir_packet(IR_CMD_PATH, active_path + 1, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_PATH, active_path + 1);
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             pbtxcmd_s13_latch = 0;
@@ -238,6 +251,7 @@ static void handle_s13_buttons(void)
                 lcd_state = LCD_S17;
             } else {
                 send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+                IR_TX_debug_print(IR_CMD_START, 0x0000);
                 intersection_num = 0;
                 crossing_updated = 0;
                 lcd_state = LCD_S5;
@@ -257,6 +271,7 @@ static void handle_s14_buttons(void)
     if (PB_TXCMD == 0) {
         if (pbtxcmd_s14_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_MODE, active_mode);
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             pbtxcmd_s14_latch = 0;
@@ -269,6 +284,7 @@ static void handle_s14_buttons(void)
     if (PB_START == 0) {
         if (pbstart_s14_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_START, 0x0000);
             lcd_state = LCD_S6;
             pbstart_s14_latch = 0;
         }
@@ -285,6 +301,7 @@ static void handle_s15_buttons(void)
     if (PB_TXCMD == 0) {
         if (pbtxcmd_s15_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_MODE, 0x0002, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_MODE, 0x0002);
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             send_path_waypoints();
@@ -298,6 +315,7 @@ static void handle_s15_buttons(void)
     if (PB_START == 0) {
         if (pbstart_s15_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_START, 0x0000);
             lcd_state = LCD_S11;
             pbstart_s15_latch = 0;
         }
@@ -318,6 +336,7 @@ static void handle_s17_buttons(void)
                 (uint16_t)(((uint16_t)manual_int_idx << 8) | (uint16_t)manual_dir),
                 IR_ADDR
             );
+            IR_TX_debug_print(IR_CMD_CROSSING_DECISION, (uint16_t)(((uint16_t)manual_int_idx << 8) | (uint16_t)manual_dir));
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             LCD_FSM_s17_advance(); // increments manual_int_idx, resets manual_dir, triggers redraw
@@ -331,6 +350,7 @@ static void handle_s17_buttons(void)
     if (JoyStick_SW == 0) {
         if (pbsw_s17_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_START, 0x0000);
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             lcd_state = LCD_S5;
@@ -349,6 +369,7 @@ static void handle_s7_buttons(void)
     if (JoyStick_SW == 0) {
         if (pb0_s7_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_START, 0xFF);
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             lcd_state = s7_resume_state;
@@ -460,24 +481,40 @@ void main (){
 			IR_RX_debug_print(&dbg_frame);
 		}
 
-		// Debug: print imu_regs[] to UART0 (~1 s throttle)
+		// Debug: print imu_regs[] to UART0 whenever any register changes
 		{
-			static unsigned int imu_dbg_cnt = 0;
-			if (++imu_dbg_cnt >= 2000u) {
-				unsigned char ri;
-				imu_dbg_cnt = 0;
+			static unsigned int xdata imu_prev[IMU_REG_COUNT];
+			static bit imu_prev_init = 0;
+			unsigned char ri;
+			bit imu_changed = 0;
+
+			if (!imu_prev_init) {
+				for (ri = 0; ri < IMU_REG_COUNT; ri++)
+					imu_prev[ri] = imu_regs[ri];
+				imu_prev_init = 1;
+			}
+
+			for (ri = 0; ri < IMU_REG_COUNT; ri++) {
+				if (imu_regs[ri] != imu_prev[ri]) {
+					imu_changed = 1;
+					break;
+				}
+			}
+
+			if (imu_changed) {
 				UART0_send_string("IMU:");
 				for (ri = 0; ri < IMU_REG_COUNT; ri++) {
 					UART0_send_char(' ');
 					uart0_send_hex_byte((unsigned char)(imu_regs[ri] >> 8));
 					uart0_send_hex_byte((unsigned char)(imu_regs[ri] & 0xFFu));
+					imu_prev[ri] = imu_regs[ri];
 				}
 				UART0_send_string("\r\n");
 			}
 		}
 
 		// Send joystick only in remote mode
-		if (lcd_state == LCD_S6) {
+		if (lcd_state == LCD_S6 && fsm_state == FSM_IDLE) {
 			send_ir_packet(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
 			while (fsm_state == FSM_IDLE);
 			while (fsm_state != FSM_IDLE);
