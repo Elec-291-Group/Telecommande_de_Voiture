@@ -62,6 +62,11 @@ static unsigned int read_t3(void)
     return ((unsigned int)hi << 8) | TMR3L;
 }
 
+unsigned int IR_RX_read_t3(void)
+{
+    return read_t3();
+}
+
 /* ---------- Port Match ISR (EFM8LB1 interrupt vector 8) ------------------- */
 void PMATCH_ISR(void) __interrupt(8)
 {

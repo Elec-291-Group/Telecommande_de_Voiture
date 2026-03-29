@@ -197,22 +197,47 @@ void Bluetooth_handle_commands(void)
     }
 }
 
+/* Timer3 runs at 6 MHz (16-bit, overflows every ~10.923 ms).
+ * 46 overflows ≈ 503 ms — close enough to 500 ms. */
+#define IMU_STREAM_OVF_PERIOD  46u
+
 void Bluetooth_forward_imu(void)
 {
+    static unsigned int  imu_last_t3  = 0;
+    static unsigned char imu_ovf_cnt  = 0;
+    unsigned int  t3_now;
+    unsigned char ri;
+    IR_Frame_t    periodic_frame;
+
+    /* Drain incoming IR frames */
     while (IR_RX_get(&bluetooth_rx_frame))
     {
         if (bluetooth_rx_frame.addr != IR_ADDR2)
             continue;
 
         IR_RX_decode_command(&bluetooth_rx_frame);
-
         IMUBuffer_push_frame(&bluetooth_rx_frame);
+    }
 
-        if (bluetooth_stream_enabled &&
-            bluetooth_rx_frame.cmd >= IMU_CMD_BASE &&
-            bluetooth_rx_frame.cmd < IMU_CMD_BASE + IMU_REG_COUNT)
-        {
-            Bluetooth_stream_imu_frame(&bluetooth_rx_frame);
-        }
+    /* Count Timer3 overflows for a non-blocking 500 ms tick */
+    t3_now = IR_RX_read_t3();
+    if (t3_now < imu_last_t3)
+        imu_ovf_cnt++;
+    imu_last_t3 = t3_now;
+
+    if (imu_ovf_cnt < IMU_STREAM_OVF_PERIOD)
+        return;
+    imu_ovf_cnt = 0;
+
+    /* Send all imu_regs[] over BLE every ~500 ms */
+    if (!bluetooth_stream_enabled)
+        return;
+
+    for (ri = 0; ri < IMU_REG_COUNT; ri++)
+    {
+        periodic_frame.cmd  = (unsigned char)(IMU_CMD_BASE + ri);
+        periodic_frame.val  = imu_regs[ri];
+        periodic_frame.addr = IR_ADDR2;
+        Bluetooth_stream_imu_frame(&periodic_frame);
     }
 }

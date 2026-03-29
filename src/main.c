@@ -479,11 +479,12 @@ void main (){
 		}
 
 		// Debug: print any addr=0x7 frame received
+        /*
 		if (dbg_frame_ready) {
 			dbg_frame_ready = 0;
 			IR_RX_debug_print(&dbg_frame);
 		}
-
+        */
 		// Debug: print imu_regs[] to UART0 whenever any register changes
 		{
 			static unsigned int xdata imu_prev[IMU_REG_COUNT];
