@@ -3,8 +3,9 @@
 
 #define IMU_HISTORY_MASK  (IMU_HISTORY_SIZE - 1)
 
-static volatile Waypoint_t xdata path_staging[PATH_MAX_WAYPOINTS];
+
 static volatile Waypoint_t xdata path_active[PATH_MAX_WAYPOINTS];
+static volatile Waypoint_t xdata path_staging[PATH_MAX_WAYPOINTS];
 static volatile unsigned char path_active_count = 0;
 static volatile unsigned char path_expected_count = 0;
 static volatile unsigned char path_write_mask[(PATH_MAX_WAYPOINTS + 7) / 8];

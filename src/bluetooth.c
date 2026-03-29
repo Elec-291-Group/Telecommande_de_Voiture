@@ -138,7 +138,7 @@ static void Bluetooth_handle_path_command(const char *cmd_text)
 	{
 		if (PathBuffer_commit()) {
 			UART1_send_string("PATH_ACK,LOADED\r\n");
-			lcd_state = LCD_S10;
+			lcd_state = LCD_S15;
 		} else {
 			UART1_send_string("PATH_ACK,ERROR\r\n");
 		}
