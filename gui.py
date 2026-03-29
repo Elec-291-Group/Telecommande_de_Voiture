@@ -887,7 +887,56 @@ class ImuGui(QWidget):
         if parsed is not None:
             self.handle_data(parsed)
 
+    # LSM6DS33 default full-scale sensitivities
+    ACCEL_SENSITIVITY = 0.000061    # ±2g  → 0.061 mg/LSB → g/LSB
+    GYRO_SENSITIVITY  = 0.00875     # ±245dps → 8.75 mdps/LSB → dps/LSB
+
+    # Mapping from imu register index to (packet_key, sensitivity)
+    IMU_REG_MAP = {
+        0: ("ax", ACCEL_SENSITIVITY),
+        1: ("ay", ACCEL_SENSITIVITY),
+        2: ("az", ACCEL_SENSITIVITY),
+        3: ("gx", GYRO_SENSITIVITY),
+        4: ("gy", GYRO_SENSITIVITY),
+        5: ("gz", GYRO_SENSITIVITY),
+    }
+
+    @staticmethod
+    def _uint16_to_int16(val):
+        return val - 65536 if val >= 32768 else val
+
     def parse_line(self, line):
+        # BLE bridge format: "imu,<reg>,<raw_uint16>"
+        imu_match = re.match(r"imu,(\d+),(\d+)", line)
+        if imu_match:
+            reg = int(imu_match.group(1))
+            raw_u16 = int(imu_match.group(2))
+            if reg in self.IMU_REG_MAP:
+                key, sensitivity = self.IMU_REG_MAP[reg]
+                self.pending_packet[key] = self._uint16_to_int16(raw_u16) * sensitivity
+
+                imu_keys = ["ax", "ay", "az", "gx", "gy", "gz"]
+                if all(k in self.pending_packet for k in imu_keys):
+                    ax = self.pending_packet["ax"]
+                    ay = self.pending_packet["ay"]
+                    az = self.pending_packet["az"]
+                    imu_roll, imu_pitch = compute_roll_pitch(ax, ay, az)
+                    packet = {
+                        "ax": ax,
+                        "ay": ay,
+                        "az": az,
+                        "gx": self.pending_packet["gx"],
+                        "gy": self.pending_packet["gy"],
+                        "gz": self.pending_packet["gz"],
+                        "imu_roll": imu_roll,
+                        "imu_pitch": imu_pitch,
+                        "raw": line,
+                    }
+                    self.pending_packet = {}
+                    return packet
+            return None
+
+        # STM32 direct serial format: "ACC[g] X:... | GYRO[dps] X:..."
         acc_gyro_match = re.match(
             r"ACC\[g\]\s*X:([-\d.]+)\s*Y:([-\d.]+)\s*Z:([-\d.]+)\s*\|\s*GYRO\[dps\]\s*X:([-\d.]+)\s*Y:([-\d.]+)\s*Z:([-\d.]+)",
             line

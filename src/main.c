@@ -297,7 +297,7 @@ static void handle_s15_buttons(void)
 {
     if (lcd_state != LCD_S15) { pbtxcmd_s15_latch = 1; pbstart_s15_latch = 1; return; }
 
-    /* PB_TXCMD: send MODE (pathfind) + all waypoints via IR */
+    /* PB_TXCMD: send MODE (pathfind) + all waypoints + zero_yaw via IR */
     if (PB_TXCMD == 0) {
         if (pbtxcmd_s15_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_MODE, 0x0002, IR_ADDR);
@@ -305,6 +305,9 @@ static void handle_s15_buttons(void)
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             send_path_waypoints();
+            while (fsm_state != FSM_IDLE);
+            send_ir_packet(IR_CMD_ZERO_YAW, 0x0012, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_ZERO_YAW, 0x0012);
             pbtxcmd_s15_latch = 0;
         }
     } else {

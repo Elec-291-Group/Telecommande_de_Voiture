@@ -23,6 +23,7 @@
 #define IR_CMD_JOYSTICK_X 5   // val = joystick_x byte
 #define IR_CMD_JOYSTICK_Y    6   // val = joystick_y byte
 #define IR_CMD_PATH_WPT_BASE     7   // cmd 7+i: path_active[i], val = (x_cm_byte<<8)|y_cm_byte
+#define IR_CMD_ZERO_YAW          39  // val = 0x0012
 #define IR_CMD_CROSSING_DECISION 40  // val: (intersection_idx<<8)|direction (0=fwd,1=left,2=right,3=stop)
 
 
