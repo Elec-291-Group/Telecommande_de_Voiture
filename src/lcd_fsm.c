@@ -232,7 +232,17 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
         case LCD_S2:
             if (joy_right && selected_path < 3) { selected_path++; need_redraw = 1; }
             if (joy_left  && selected_path > 0) { selected_path--; need_redraw = 1; }
-            if (pb0_pressed) lcd_state = LCD_S3;
+            if (pb0_pressed) {
+                if (selected_path == 3) {
+                    active_mode = selected_mode;
+                    active_path = selected_path;
+                    manual_int_idx = 0;
+                    manual_dir = 0;
+                    lcd_state = LCD_S17;
+                } else {
+                    lcd_state = LCD_S3;
+                }
+            }
             if (joy_up)      lcd_state = LCD_S1;
             break;
 
