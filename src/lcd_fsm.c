@@ -1,23 +1,26 @@
 #include "lcd_fsm.h"
 #include "lcd.h"
 #include "config.h"
-#include "data_buffers.h"
 
 // ---- Joystick thresholds ----
 #define JOY_HIGH     200
-#define JOY_LOW       50
+#define JOY_LOW       70
 #define JOY_MID_LO   130
 #define JOY_MID_HI   180
 
 // ---- Public state ----
 lcd_state_t   lcd_state    = LCD_S0;
 unsigned char selected_mode = 0;   // 0=auto, 1=remote, 2=pathfind
-unsigned char selected_path = 0;   // 0=path1, 1=path2, 2=path3  (navigation cursor)
+unsigned char selected_path = 0;   // 0=path1, 1=path2, 2=path3, 3=manual
 unsigned char active_mode   = 0;   // locked in when running starts: 0=auto, 1=remote, 2=pathfind
-unsigned char active_path   = 0;   // locked in when running starts: 0=path1, 1=path2, 2=path3
+unsigned char active_path   = 0;   // locked in when running starts: 0=path1, 1=path2, 2=path3, 3=manual
+unsigned char manual_int_idx = 0;  // current intersection being configured in S17 (0-7)
+unsigned char manual_dir     = 0;  // currently selected direction in S17
+unsigned int  manual_path_buf = 0; // packed 16-bit: 2 bits per intersection
 
 // ---- Internal ----
 static lcd_state_t prev_state = LCD_NUM_STATES; // force redraw on first call
+// s7_from_s11 removed — main.c now tracks resume state and handles S7 resume
 
 // Joystick latches: must return to center before next trigger
 static bit joy_x_ready = 1;
@@ -26,110 +29,13 @@ static bit joy_y_ready = 1;
 // Button latches: must release before next press registers
 static bit pb0_ready = 1;
 static bit pb1_ready = 1;
-static Waypoint_t xdata path_test_waypoint;
-static unsigned char path_test_count = 0;
-static char xdata lcd_line_buf[17];
-
-static void format_joystick_status(char *buf, unsigned char x_byte, unsigned char y_byte)
-{
-    buf[0] = 'X';
-    buf[1] = ':';
-    buf[2] = (char)('0' + (x_byte / 100u));
-    buf[3] = (char)('0' + ((x_byte / 10u) % 10u));
-    buf[4] = (char)('0' + (x_byte % 10u));
-    buf[5] = ' ';
-    buf[6] = 'Y';
-    buf[7] = ':';
-    buf[8] = (char)('0' + (y_byte / 100u));
-    buf[9] = (char)('0' + ((y_byte / 10u) % 10u));
-    buf[10] = (char)('0' + (y_byte % 10u));
-    buf[11] = ' ';
-    buf[12] = ' ';
-    buf[13] = ' ';
-    buf[14] = ' ';
-    buf[15] = ' ';
-    buf[16] = '\0';
-}
-
-static void format_uint3(char *buf, unsigned int value)
-{
-    if (value > 999u)
-        value = 999u;
-
-    buf[0] = (char)('0' + (value / 100u));
-    buf[1] = (char)('0' + ((value / 10u) % 10u));
-    buf[2] = (char)('0' + (value % 10u));
-}
-
-static void format_coord4(char *buf, int value)
-{
-    unsigned int magnitude;
-
-    if (value < 0) {
-        buf[0] = '-';
-        magnitude = (unsigned int)(-value);
-    } else {
-        buf[0] = '+';
-        magnitude = (unsigned int)value;
-    }
-
-    if (magnitude > 999u)
-        magnitude = 999u;
-
-    buf[1] = (char)('0' + (magnitude / 100u));
-    buf[2] = (char)('0' + ((magnitude / 10u) % 10u));
-    buf[3] = (char)('0' + (magnitude % 10u));
-}
-
-static void format_path_buffer_status(char *buf)
-{
-    if (!PathBuffer_is_loaded()) {
-        LCDprint("Path:not loaded ", 1, 0);
-        LCDprint("Wait PATH_END   ", 2, 0);
-        return;
-    }
-
-    path_test_count = PathBuffer_get_count();
-    if ((path_test_count == 0u) || !PathBuffer_get(0u, &path_test_waypoint)) {
-        LCDprint("Path N:000      ", 1, 0);
-        LCDprint("No waypoint     ", 2, 0);
-        return;
-    }
-
-    buf[0] = 'P';
-    buf[1] = 'a';
-    buf[2] = 't';
-    buf[3] = 'h';
-    buf[4] = ' ';
-    buf[5] = 'N';
-    buf[6] = ':';
-    format_uint3(&buf[7], path_test_count);
-    buf[10] = ' ';
-    buf[11] = ' ';
-    buf[12] = ' ';
-    buf[13] = ' ';
-    buf[14] = ' ';
-    buf[15] = ' ';
-    buf[16] = '\0';
-    LCDprint(buf, 1, 0);
-
-    buf[0] = 'X';
-    buf[1] = ':';
-    format_coord4(&buf[2], path_test_waypoint.x_cm);
-    buf[6] = ' ';
-    buf[7] = 'Y';
-    buf[8] = ':';
-    format_coord4(&buf[9], path_test_waypoint.y_cm);
-    buf[13] = ' ';
-    buf[14] = ' ';
-    buf[15] = ' ';
-    buf[16] = '\0';
-    LCDprint(buf, 2, 0);
-}
-
 // ---- Redraw current state to LCD ----
 static void redraw(void)
 {
+    static xdata char s17_line1[17];
+    unsigned char i;
+    unsigned char n;
+
     switch (lcd_state)
     {
         case LCD_S0:
@@ -149,12 +55,10 @@ static void redraw(void)
 
         case LCD_S2:
             LCDprint("Choose Path:    ", 1, 0);
-            if (selected_path == 0)
-                LCDprint(">P1  P2  P3     ", 2, 0);
-            else if (selected_path == 1)
-                LCDprint(" P1 >P2  P3     ", 2, 0);
-            else
-                LCDprint(" P1  P2 >P3     ", 2, 0);
+            if      (selected_path == 0) LCDprint(">P1  P2  P3  Man", 2, 0);
+            else if (selected_path == 1) LCDprint(" P1 >P2  P3  Man", 2, 0);
+            else if (selected_path == 2) LCDprint(" P1  P2 >P3  Man", 2, 0);
+            else                         LCDprint(" P1  P2  P3 >Man", 2, 0);
             break;
 
         case LCD_S3:
@@ -167,14 +71,9 @@ static void redraw(void)
             LCDprint("Press PB0       ", 2, 0);
             break;
 
-        case LCD_S8:
-            LCDprint("Ready (Pathfind)", 1, 0);
-            LCDprint("Press PB0       ", 2, 0);
-            break;
-
         case LCD_S5:
             LCDprint("Running (Field) ", 1, 0);
-            LCDprint("PB1: Pause      ", 2, 0);
+            LCDprint("PB_PAUSE:Pause  ", 2, 0);
             break;
 
         case LCD_S6:
@@ -182,18 +81,13 @@ static void redraw(void)
             LCDprint("                ", 2, 0);
             break;
 
-        case LCD_S9:
-            LCDprint("Running (Path)  ", 1, 0);
-            LCDprint("PB1: Pause      ", 2, 0);
-            break;
-
         case LCD_S7:
             LCDprint("Paused          ", 1, 0);
-            LCDprint("PB0:Go  PB1:Rst ", 2, 0);
+            LCDprint("PB0:Go RST:Reset", 2, 0);
             break;
 
         case LCD_S8:
-            LCDprint("Ready (Path)    ", 1, 0);
+            LCDprint("Path Tracking   ", 1, 0);
             LCDprint("Press PB0       ", 2, 0);
             break;
 
@@ -202,9 +96,61 @@ static void redraw(void)
             LCDprint("Wait PATH_END   ", 2, 0);
             break;
 
+        case LCD_S11:
+            LCDprint("Running (Path)  ", 1, 0);
+            LCDprint("                ", 2, 0);
+            break;
+
+        case LCD_S13:
+            LCDprint("Ready to IR TX  ", 1, 0);
+            LCDprint("Press PB_TX     ", 2, 0);
+            break;
+
+        case LCD_S14:
+            LCDprint("Ready to IR TX  ", 1, 0);
+            LCDprint("Press PB_TX     ", 2, 0);
+            break;
+
+        case LCD_S15:
+            LCDprint("Ready to IR TX  ", 1, 0);
+            LCDprint("Press PB_TX     ", 2, 0);
+            break;
+
+        case LCD_S17:
+            i = 0;
+            s17_line1[i++] = 'M'; s17_line1[i++] = 'a'; s17_line1[i++] = 'n';
+            s17_line1[i++] = ' ';
+            s17_line1[i++] = 'I'; s17_line1[i++] = 'n'; s17_line1[i++] = 't'; s17_line1[i++] = ':';
+            n = manual_int_idx + 1;
+            if (n >= 10) s17_line1[i++] = (char)('0' + n / 10);
+            s17_line1[i++] = (char)('0' + n % 10);
+            while (i < 16) s17_line1[i++] = ' ';
+            s17_line1[16] = '\0';
+            LCDprint(s17_line1, 1, 0);
+            switch (manual_dir) {
+                case 0: LCDprint(">Forward        ", 2, 0); break;
+                case 1: LCDprint(">Left           ", 2, 0); break;
+                case 2: LCDprint(">Right          ", 2, 0); break;
+                case 3: LCDprint(">Stop           ", 2, 0); break;
+                default: break;
+            }
+            break;
+
+        case LCD_S18:
+            LCDprint("Ready to IR TX  ", 1, 0);
+            LCDprint("Press PB_TX     ", 2, 0);
+            break;
+
         default:
             break;
     }
+}
+
+// ---- Pause helper (called from main.c) ----
+void LCD_FSM_pause(lcd_state_t from_state)
+{
+    (void)from_state; // resume state tracked by main.c
+    lcd_state = LCD_S7;
 }
 
 // ---- Init ----
@@ -212,14 +158,17 @@ void LCD_FSM_init(void)
 {
     lcd_state     = LCD_S0;
     prev_state    = LCD_NUM_STATES;
-    selected_mode = 0;
-    selected_path = 0;
-    active_mode   = 0;
-    active_path   = 0;
-    joy_x_ready   = 1;
-    joy_y_ready   = 1;
-    pb0_ready     = 1;
-    pb1_ready     = 1;
+    selected_mode  = 0;
+    selected_path  = 0;
+    active_mode    = 0;
+    active_path    = 0;
+    manual_int_idx = 0;
+    manual_dir     = 0;
+    manual_path_buf = 0;
+    joy_x_ready    = 1;
+    joy_y_ready    = 1;
+    pb0_ready      = 1;
+    pb1_ready      = 1;
 }
 
 // ---- Update — call every main loop iteration ----
@@ -240,7 +189,7 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
         pb0_ready = 1;
     }
 
-    if (PB1 == 0) {
+    if (PB_PAUSE == 0) {
         if (pb1_ready) { pb1_pressed = 1; pb1_ready = 0; }
     } else {
         pb1_ready = 1;
@@ -273,55 +222,76 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
             break;
 
         case LCD_S2:
-            if (joy_right && selected_path < 2) { selected_path++; need_redraw = 1; }
+            if (joy_right && selected_path < 3) { selected_path++; need_redraw = 1; }
             if (joy_left  && selected_path > 0) { selected_path--; need_redraw = 1; }
-            if (pb0_pressed) lcd_state = LCD_S3;
+            if (pb0_pressed) {
+                if (selected_path == 3) {
+                    active_mode = selected_mode;
+                    active_path = selected_path;
+                    manual_int_idx = 0;
+                    manual_dir = 0;
+                    manual_path_buf = 0;
+                    lcd_state = LCD_S17;
+                } else {
+                    lcd_state = LCD_S3;
+                }
+            }
             if (joy_up)      lcd_state = LCD_S1;
             break;
 
         case LCD_S3:
-            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S5; }
+            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S13; }
             if (joy_up)      lcd_state = LCD_S2;
             break;
 
         case LCD_S4:
-            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S6; }
-            if (joy_up)      lcd_state = LCD_S1;
-            break;
-
-        case LCD_S8:
-            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S9; }
+            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S14; }
             if (joy_up)      lcd_state = LCD_S1;
             break;
 
         case LCD_S5:
-            if (pb1_pressed) lcd_state = LCD_S7;
             break;
 
         case LCD_S6:
-            if (pb1_pressed) lcd_state = LCD_S7;
             break;
 
         case LCD_S8:
-            if (pb0_pressed) { active_mode = selected_mode; active_path = selected_path; lcd_state = LCD_S9; }
+            /* pb0 start handled by handle_s8_buttons() in main.c */
             if (joy_up)      lcd_state = LCD_S1;
             break;
 
-        case LCD_S9:
-            if (pb1_pressed) lcd_state = LCD_S7;
-            break;
-
         case LCD_S7:
-            if (pb0_pressed) {
-                if      (active_mode == 0) lcd_state = LCD_S5;
-                else if (active_mode == 1) lcd_state = LCD_S6;
-                else                       lcd_state = LCD_S9;
-            }
+            /* pb0 resume handled by handle_s7_buttons() in main.c */
             if (pb1_pressed) {
                 selected_mode = 0;
                 selected_path = 0;
                 lcd_state = LCD_S0;
             }
+            break;
+
+        case LCD_S9:
+            break;
+
+        case LCD_S11:
+            break;
+
+        case LCD_S17:
+            if (joy_right) { manual_dir = (manual_dir < 3) ? manual_dir + 1 : 0; need_redraw = 1; }
+            if (joy_left)  { manual_dir = (manual_dir > 0) ? manual_dir - 1 : 3; need_redraw = 1; }
+            if (pb0_pressed) {
+                /* Save current direction into packed buffer */
+                manual_path_buf |= ((unsigned int)manual_dir << (manual_int_idx * 2));
+                manual_int_idx++;
+                if (manual_int_idx >= 8) {
+                    lcd_state = LCD_S18;
+                } else {
+                    manual_dir = 0;
+                    need_redraw = 1;
+                }
+            }
+            break;
+
+        case LCD_S18:
             break;
 
         default:
@@ -336,13 +306,4 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
         redraw();
     }
 
-    // Live joystick update in S6
-    if (lcd_state == LCD_S6 && prev_state == LCD_S6) {
-        format_joystick_status(lcd_line_buf, x_byte, y_byte);
-        LCDprint(lcd_line_buf, 2, 0);
-    }
-
-    if (lcd_state == LCD_S9 && prev_state == LCD_S9) {
-        format_path_buffer_status(lcd_line_buf);
-    }
 }

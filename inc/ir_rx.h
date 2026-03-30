@@ -42,4 +42,7 @@ void IR_RX_init(void);
  * 0 if the buffer was empty.  Safe to call from the main loop. */
 unsigned char IR_RX_get(IR_Frame_t *out);
 
+/* Read the current Timer 3 value (6 MHz free-running, 1 tick ≈ 0.167 µs). */
+unsigned int IR_RX_read_t3(void);
+
 #endif /* IR_RX_H */
