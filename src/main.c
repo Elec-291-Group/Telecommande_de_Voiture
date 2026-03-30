@@ -368,7 +368,6 @@ static void handle_s17_buttons(void)
     /* PB_TXCMD: send current intersection decision and advance */
     if (PB_TXCMD == 0) {
         if (pbtxcmd_s17_latch && fsm_state == FSM_IDLE && manual_int_idx < 8) {
-            if (manual_int_idx == 7) manual_dir = 3; /* force Stop on 8th */
             send_ir_packet(
                 (uint8_t)IR_CMD_CROSSING_DECISION,
                 (uint16_t)(((uint16_t)manual_int_idx << 8) | (uint16_t)manual_dir),
@@ -377,18 +376,7 @@ static void handle_s17_buttons(void)
             IR_TX_debug_print(IR_CMD_CROSSING_DECISION, (uint16_t)(((uint16_t)manual_int_idx << 8) | (uint16_t)manual_dir));
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
-            if (manual_dir == 3) {
-                /* Stop chosen — done programming, send START and run */
-                send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
-                while (fsm_state == FSM_IDLE);
-                while (fsm_state != FSM_IDLE);
-                IR_TX_debug_print(IR_CMD_START, 0x0000);
-                intersection_num = 0;
-                crossing_updated = 0;
-                lcd_state = LCD_S5;
-            } else {
-                LCD_FSM_s17_advance(); // increments manual_int_idx, resets manual_dir, triggers redraw
-            }
+            LCD_FSM_s17_advance(); // increments manual_int_idx, resets manual_dir, triggers redraw
             pbtxcmd_s17_latch = 0;
         }
     } else {
