@@ -365,7 +365,6 @@ class RobotVisualizationWidget(QWidget):
         self.moving = False
         self.left_power = 0
         self.right_power = 0
-
         # animation state
         self._road_offset = 0.0   # scrolling dash phase (px)
         self._steer_angle = 0.0   # visual steering angle (smoothed, deg)
@@ -451,6 +450,12 @@ class RobotVisualizationWidget(QWidget):
         # road geometry
         road_half = min(w * 0.32, 180.0)
         curv = self._road_curvature            # px offset at horizon
+        center_pen = QPen(QColor(160, 175, 195), 2)
+        center_pen.setStyle(Qt.CustomDashLine)
+        center_pen.setDashPattern([8, 8])
+        center_pen.setDashOffset(self._road_offset)
+        painter.setPen(center_pen)
+        painter.drawLine(int(cx), 40, int(cx), h - 110)
 
         # helper: x-centre of road at a given depth t (0=bottom, 1=horizon)
         def road_cx_at(t):
