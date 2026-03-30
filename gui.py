@@ -572,7 +572,6 @@ class ImuGui(QWidget):
         self.max_samples = 300
         self.sample_counter = 0
         self.packet_count = 0
-        self.last_packet_time = None
         self.last_good_port = ""
         self.pending_packet = {}
 
@@ -615,9 +614,6 @@ class ImuGui(QWidget):
         self.update_orientation_curve_visibility()
         QTimer.singleShot(0, self.auto_connect_serial)
 
-        self.link_timer = QTimer(self)
-        self.link_timer.timeout.connect(self.check_link_status)
-        self.link_timer.start(250)
 
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -663,7 +659,7 @@ class ImuGui(QWidget):
         self.stop_log_btn.setEnabled(False)
 
         self.status_label = QLabel("Status: Disconnected")
-        self.status_label.setStyleSheet("font-weight: 700; color: #64748b; font-size: 22px; padding: 4px 0;")
+        self.status_label.setStyleSheet("font-weight: bold; color: #6b7280;")
         self.console = QTextEdit()
         self.console.setMaximumHeight(250)
 
@@ -679,13 +675,11 @@ class ImuGui(QWidget):
             self.labels[key] = _styled_value_label()
 
         self.connection_indicator = QLabel("Disconnected")
-        self.link_indicator = QLabel("No Link")
         self.motion_indicator = QLabel("Unknown")
         self.tilt_indicator = QLabel("No Alarm")
         self.filter_indicator = QLabel("IMU Angles")
 
         self.ping_btn = QPushButton("Ping STM32")
-        self.reset_link_btn = QPushButton("Reset Link Status")
         self.calib_accel_btn = QPushButton("Calibrate Accel")
         self.calib_gyro_btn = QPushButton("Calibrate Gyro")
         self.reset_orientation_btn = QPushButton("Reset Orientation")
@@ -715,11 +709,6 @@ class ImuGui(QWidget):
         self.motion_thresh.setRange(0.0, 1000.0)
         self.motion_thresh.setValue(2.0)
         self.motion_thresh.setDecimals(3)
-        self.link_timeout = QDoubleSpinBox()
-        self.link_timeout.setRange(0.1, 10.0)
-        self.link_timeout.setValue(1.0)
-        self.link_timeout.setDecimals(2)
-
         # ── Bluetooth group ──
         bluetooth_group = QGroupBox("Bluetooth")
         bluetooth_layout = QGridLayout()
@@ -729,11 +718,15 @@ class ImuGui(QWidget):
         device_label.setStyleSheet("color: #8892a4; font-weight: 600;")
         bluetooth_layout.addWidget(device_label, 0, 0)
         bluetooth_layout.addWidget(self.port_combo, 0, 1, 1, 3)
+        self.stream_btn = QPushButton("Stream ON")
+        self.stream_btn.setEnabled(False)
+
         bluetooth_layout.addWidget(self.refresh_btn, 1, 0)
         bluetooth_layout.addWidget(self.connect_btn, 1, 1)
         bluetooth_layout.addWidget(self.disconnect_btn, 1, 2)
         bluetooth_layout.addWidget(self.reconnect_btn, 1, 3)
-        bluetooth_layout.addWidget(self.status_label, 2, 0, 1, 4)
+        bluetooth_layout.addWidget(self.stream_btn, 2, 0, 1, 4)
+        bluetooth_layout.addWidget(self.status_label, 3, 0, 1, 4)
         bluetooth_group.setLayout(bluetooth_layout)
         tab_layout.addWidget(bluetooth_group)
 
@@ -750,8 +743,8 @@ class ImuGui(QWidget):
         self.calib_gyro_btn.clicked.connect(self.calibrate_gyro)
         self.reset_orientation_btn.clicked.connect(self.reset_orientation)
         self.clear_plots_btn.clicked.connect(self.clear_plots)
-        self.reset_link_btn.clicked.connect(self.reset_link_status)
         self.estop_btn.clicked.connect(self.emergency_stop)
+        self.stream_btn.clicked.connect(self.toggle_stream)
 
     def append_console(self, msg):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -792,7 +785,6 @@ class ImuGui(QWidget):
 
     def connect_serial(self):
         if self.worker is not None and self.worker.isRunning():
-            self.append_console("Already connected")
             return
 
         port = self.get_selected_port()
@@ -800,6 +792,11 @@ class ImuGui(QWidget):
         if not port and not device_name:
             QMessageBox.warning(self, "No Device", "No Bluetooth device selected")
             return
+
+        self.status_label.setText("Status: Connecting...")
+        self.status_label.setStyleSheet("font-weight: bold; color: #f59e0b;")
+        self.connect_btn.setEnabled(False)
+        self.append_console("Connecting...")
 
         self.last_good_port = port
 
@@ -874,16 +871,29 @@ class ImuGui(QWidget):
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(True)
             self.reconnect_btn.setEnabled(True)
+            self.stream_btn.setEnabled(True)
         else:
             self.status_label.setText("Status: Disconnected")
             self.status_label.setStyleSheet("font-weight: bold; color: #6b7280;")
             self.connection_indicator.setText("Disconnected")
             self.connection_indicator.setStyleSheet("font-weight: bold; color: #ef4444;")
-            self.link_indicator.setText("No Link")
-            self.link_indicator.setStyleSheet("font-weight: bold; color: #ef4444;")
             self.connect_btn.setEnabled(True)
             self.disconnect_btn.setEnabled(False)
             self.reconnect_btn.setEnabled(True)
+            self.stream_btn.setEnabled(False)
+            self.stream_btn.setText("Stream ON")
+
+    def toggle_stream(self):
+        if self.worker is None:
+            return
+        if self.stream_btn.text() == "Stream ON":
+            self.worker.send_text("STREAM_ON\n")
+            self.stream_btn.setText("Stream OFF")
+            self.append_console("Sent STREAM_ON")
+        else:
+            self.worker.send_text("STREAM_OFF\n")
+            self.stream_btn.setText("Stream ON")
+            self.append_console("Sent STREAM_OFF")
 
     def handle_ble_line(self, line):
         self.pathfinder_tab.handle_serial_line(line)
@@ -933,25 +943,23 @@ class ImuGui(QWidget):
                 key, sensitivity = self.IMU_REG_MAP[reg]
                 self.pending_packet[key] = self._uint16_to_int16(raw_u16) * sensitivity
 
-                imu_keys = ["ax", "ay", "az", "gx", "gy", "gz"]
-                if all(k in self.pending_packet for k in imu_keys):
+                # Emit as soon as ax/ay/az are known — use last known gx/gy/gz if not yet updated
+                if all(k in self.pending_packet for k in ["ax", "ay", "az"]):
                     ax = self.pending_packet["ax"]
                     ay = self.pending_packet["ay"]
                     az = self.pending_packet["az"]
                     imu_roll, imu_pitch = compute_roll_pitch(ax, ay, az)
-                    packet = {
+                    return {
                         "ax": ax,
                         "ay": ay,
                         "az": az,
-                        "gx": self.pending_packet["gx"],
-                        "gy": self.pending_packet["gy"],
-                        "gz": self.pending_packet["gz"],
+                        "gx": self.pending_packet.get("gx", 0.0),
+                        "gy": self.pending_packet.get("gy", 0.0),
+                        "gz": self.pending_packet.get("gz", 0.0),
                         "imu_roll": imu_roll,
                         "imu_pitch": imu_pitch,
                         "raw": line,
                     }
-                    self.pending_packet = {}
-                    return packet
             return None
 
         # STM32 direct serial format: "ACC[g] X:... | GYRO[dps] X:..."
@@ -1057,7 +1065,7 @@ class ImuGui(QWidget):
             sample_rate = 1.0 / dt
 
         self.last_time = now
-        self.last_packet_time = now
+
         self.packet_count += 1
         self.latest_raw = d
 
@@ -1112,9 +1120,6 @@ class ImuGui(QWidget):
         self.labels["sample_rate"].setText(f"{sample_rate:.1f} Hz")
         self.labels["packets"].setText(str(self.packet_count))
         self.labels["last_packet"].setText("0.00 s ago")
-
-        self.link_indicator.setText("Link Alive")
-        self.link_indicator.setStyleSheet("font-weight: bold; color: #22c55e;")
 
         self.sample_counter += 1
         self.t.append(self.sample_counter)
@@ -1261,40 +1266,10 @@ class ImuGui(QWidget):
         self.append_console("Plots cleared")
 
     def reset_link_status(self):
-        self.last_packet_time = None
         self.packet_count = 0
         self.labels["packets"].setText("0")
         self.labels["last_packet"].setText("N/A")
-        self.link_indicator.setText("Waiting")
-        self.link_indicator.setStyleSheet("font-weight: bold; color: #fb923c;")
         self.append_console("Serial link status reset")
-
-    def check_link_status(self):
-        if self.connection_indicator.text() != "Connected":
-            self.labels["last_packet"].setText("N/A")
-            return
-
-        if self.last_packet_time is None:
-            self.link_indicator.setText("Waiting")
-            self.link_indicator.setStyleSheet("font-weight: bold; color: #fb923c;")
-            self.labels["last_packet"].setText("No data")
-            return
-
-        age = time.time() - self.last_packet_time
-        self.labels["last_packet"].setText(f"{age:.2f} s ago")
-
-        if age > self.link_timeout.value():
-            self.link_indicator.setText("Link Lost")
-            self.link_indicator.setStyleSheet("font-weight: bold; color: #ef4444;")
-            if self.connection_indicator.text() == "Connected":
-                self.status_label.setText("Status: Link Lost")
-                self.status_label.setStyleSheet("font-weight: bold; color: #ef4444;")
-        else:
-            self.link_indicator.setText("Link Alive")
-            self.link_indicator.setStyleSheet("font-weight: bold; color: #22c55e;")
-            if self.tilt_indicator.text() != "TILT ALARM" and self.connection_indicator.text() == "Connected":
-                self.status_label.setText("Status: Connected")
-                self.status_label.setStyleSheet("font-weight: bold; color: #22c55e;")
 
     def send_serial_command(self, cmd):
         if self.worker is None:
