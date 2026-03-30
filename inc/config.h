@@ -7,7 +7,7 @@
 #define SARCLK   18000000L
 
 // ---- ADC reference voltage ----
-#define VDD 4.637f // Measured VDD in volts
+#define VDD 4.3f // / Wire 4.637
 
 // IR addresses
 #define IR_ADDR1           0x6   // EFM8 TX address (received by STM32)
@@ -32,6 +32,7 @@
 #define IR_RX_CMD_CROSSING_ACTION 26   // val: 0x00=straight, 0x01=left, 0x02=right, 0x03=stop
 #define IR_RX_CMD_LEFT_POWER      27  // val: high byte=positive part, low byte=negative part (abs)
 #define IR_RX_CMD_RIGHT_POWER     28  // val: high byte=positive part, low byte=negative part (abs)
+#define IR_RX_CMD_IS_CONFIG       29  // val: 0x0000 — car finished config, trigger reset
 
 // ---- IMU register array indices (0-17 → imu_regs[]) ----
 #define IMU_CMD_BASE        7   /* command byte offset for IMU registers */

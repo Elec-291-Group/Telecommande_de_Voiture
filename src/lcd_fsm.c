@@ -4,7 +4,7 @@
 
 // ---- Joystick thresholds ----
 #define JOY_HIGH     200
-#define JOY_LOW       50
+#define JOY_LOW       70
 #define JOY_MID_LO   130
 #define JOY_MID_HI   180
 

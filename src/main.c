@@ -84,7 +84,7 @@ static void IR_TX_debug_print(unsigned char cmd, unsigned int val)
     uart0_send_hex_byte((unsigned char)(val & 0xFFu));
     UART0_send_string("\r\n");
 }
-
+/*
 void IR_debug(void)
 {
     IR_Frame_t f;
@@ -117,17 +117,10 @@ static void IR_RX_debug_print(const IR_Frame_t *frame)
     uart0_send_hex_byte(frame->addr);
     UART0_send_string("\r\n");
 }
-
-static IR_Frame_t xdata dbg_frame;
-static bit dbg_frame_ready = 0;
+*/
 
 void IR_RX_decode_command(const IR_Frame_t *frame)
 {
-    dbg_frame.cmd  = frame->cmd;
-    dbg_frame.val  = frame->val;
-    dbg_frame.addr = frame->addr;
-    dbg_frame_ready = 1;
-
     switch (frame->cmd)
     {
         case IR_RX_CMD_DATA_RECEIVED:
@@ -157,6 +150,11 @@ void IR_RX_decode_command(const IR_Frame_t *frame)
             break;
         }
 
+        case IR_RX_CMD_IS_CONFIG:
+           // UART1_send_string("btn,reset\r\n");
+            lcd_state = LCD_S0;
+            break;
+        
         default:
             break;
     }
@@ -185,6 +183,7 @@ static void handle_pb_start(void)
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_START, 0x0000);
+            UART1_send_string("btn,start\r\n");
             pb_start_latch = 0;
         }
     } else {
@@ -200,6 +199,7 @@ static void handle_pb_pause(void)
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_PAUSE, 0x0000);
+            UART1_send_string("btn,pause\r\n");
             if (lcd_state == LCD_S5  || lcd_state == LCD_S6 ||
                 lcd_state == LCD_S9  || lcd_state == LCD_S11) {
                 s7_resume_state = lcd_state;
@@ -220,6 +220,7 @@ static void handle_pb_reset(void)
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_RESET, 0x0000);
+            UART1_send_string("btn,reset\r\n");
             lcd_state = LCD_S0;
             pb_reset_latch = 0;
         }
@@ -374,6 +375,10 @@ static void handle_s18_buttons(void)
             IR_TX_debug_print(IR_CMD_MANUL_PATH, manual_path_buf);
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
+            send_ir_packet(IR_CMD_MANUL_PATH, manual_path_buf, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_MANUL_PATH, manual_path_buf);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
             pbtxcmd_s18_latch = 0;
         }
     } else {
@@ -484,7 +489,6 @@ void main (){
 	while(1){
         // poBluetooth_debug_drive_sequencewer debug 
        // Bluetooth_debug_drive_sequence();
-
         
 		Bluetooth_handle_commands();
 		Bluetooth_forward_imu();
@@ -495,6 +499,12 @@ void main (){
 		y_byte = volt_to_byte(joystick_y);
 
 		LCD_FSM_update(x_byte, y_byte);
+        // printf ("JOYSTICK: %c  %c", x_byte, y_byte);
+        UART0_send_string("JOY X=");
+        uart0_send_hex_byte(x_byte);
+        UART0_send_string(" Y=");
+        uart0_send_hex_byte(y_byte);
+        UART0_send_string("\r\n");
 
 		handle_pb_start();
 		handle_pb_pause();
@@ -511,7 +521,6 @@ void main (){
 			crossing_updated = 0;
 			update_crossing_display();
 		}
-
 		// Debug: print any addr=0x7 frame received
         /*
 		if (dbg_frame_ready) {
@@ -520,6 +529,7 @@ void main (){
 		}
         */
 		// Debug: print individual imu_reg when it changes
+/*
 		{
 			static unsigned int xdata imu_prev[IMU_REG_COUNT];
 			static bit imu_prev_init = 0;
@@ -543,8 +553,9 @@ void main (){
 				}
 			}
 		}
-
+    */
 		// Debug: print left/right power whenever they change
+    /*
 		{
 			static signed char prev_lp = 0;
 			static signed char prev_rp = 0;
@@ -567,8 +578,7 @@ void main (){
 				prev_lp = left_power;
 				prev_rp = right_power;
 			}
-		}
-
+		}*/
 		// Send joystick only in remote mode
 		if (lcd_state == LCD_S6 && fsm_state == FSM_IDLE) {
 			send_ir_packet(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);

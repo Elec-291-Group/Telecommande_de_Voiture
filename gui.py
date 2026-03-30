@@ -7,8 +7,8 @@ from pathlib import Path
 from datetime import datetime
 from collections import deque
 
-from PyQt5.QtCore import Qt, QTimer, QRectF
-from PyQt5.QtGui import QColor, QPainter, QPen, QBrush, QLinearGradient, QFont
+from PyQt5.QtCore import Qt, QTimer, QRectF, QPointF
+from PyQt5.QtGui import QColor, QPainter, QPen, QBrush, QLinearGradient, QFont, QPolygonF
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QTextEdit, QPlainTextEdit,
@@ -308,11 +308,9 @@ QFrame#separator {
 """
 
 
-# ── Solarbotics GM4 physical constants ──────────────────────────────────────
+# ── Physical constants (measured) ──────────────────────────────────────
 _WHEELBASE_CM    = 10.6
-_WHEEL_RADIUS_CM = 3.3
-_MAX_RPM         = 77.0
-_MAX_SPEED_CM_S  = _MAX_RPM * 2 * math.pi * _WHEEL_RADIUS_CM / 60.0  # ≈ 26.6 cm/s
+_MAX_SPEED_CM_S  = 100.0 / 7.0  # measured: 1 m in 7 s ≈ 14.3 cm/s
 
 
 def compute_motion_state(left: float, right: float, threshold: float = 5.0) -> dict:
@@ -351,6 +349,11 @@ def compute_roll_pitch(ax, ay, az):
 
 
 class RobotVisualizationWidget(QWidget):
+    _ANIM_FPS = 30
+    _ANIM_DT = 1.0 / _ANIM_FPS
+    _DASH_SPACING = 60.0       # px between dash centres at bottom of road
+    _DASH_LEN_RATIO = 0.40     # fraction of spacing that is painted
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumSize(560, 640)
@@ -363,6 +366,20 @@ class RobotVisualizationWidget(QWidget):
         self.left_power = 0
         self.right_power = 0
 
+        # animation state
+        self._road_offset = 0.0   # scrolling dash phase (px)
+        self._steer_angle = 0.0   # visual steering angle (smoothed, deg)
+        self._road_curvature = 0.0  # smoothed curvature for road bending (px)
+        self._car_heading = 0.0   # cumulative heading for world sim (rad)
+        self._car_world_x = 0.0   # world position cm
+        self._car_world_y = 0.0
+        self._trail = deque(maxlen=200)
+
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(int(1000 / self._ANIM_FPS))
+        self._anim_timer.timeout.connect(self._tick)
+        self._anim_timer.start()
+
     def set_vehicle_state(self, roll_deg, pitch_deg, accel, gyro, connected, moving, left_power, right_power):
         self.roll_deg = roll_deg
         self.pitch_deg = pitch_deg
@@ -372,210 +389,356 @@ class RobotVisualizationWidget(QWidget):
         self.moving = moving
         self.left_power = left_power
         self.right_power = right_power
+
+    # ── animation tick ──────────────────────────────────────────────────
+    def _tick(self):
+        ms = compute_motion_state(self.left_power, self.right_power)
+        speed = ms['linear_vel_cms']            # cm/s
+        ang_vel = ms['angular_vel_rads']        # rad/s
+        dt = self._ANIM_DT
+
+        # scroll road dashes (positive speed = dashes move toward camera)
+        px_per_cm = 4.0
+        self._road_offset = (self._road_offset + speed * px_per_cm * dt) % self._DASH_SPACING
+
+        # smooth visual steering toward target
+        target_steer = max(-35.0, min(35.0, math.degrees(ang_vel) * 2.5))
+        self._steer_angle += (target_steer - self._steer_angle) * min(1.0, 6.0 * dt)
+
+        # smooth road curvature (negative = road bends left = car turning right)
+        target_curve = max(-220.0, min(220.0, -math.degrees(ang_vel) * 18.0))
+        self._road_curvature += (target_curve - self._road_curvature) * min(1.0, 4.0 * dt)
+
+        # integrate world pose
+        self._car_heading += ang_vel * dt
+        self._car_world_x += speed * math.cos(self._car_heading) * dt
+        self._car_world_y += speed * math.sin(self._car_heading) * dt
+
+        if abs(speed) > 0.5:
+            self._trail.append((self._car_world_x, self._car_world_y))
+
         self.update()
 
+    # ── perspective helpers ─────────────────────────────────────────────
+    @staticmethod
+    def _road_x_at_y(vx, vy, left_x, right_x, bot_y, y):
+        """Interpolate road edge x at a given screen y using perspective."""
+        if abs(bot_y - vy) < 1e-3:
+            return (left_x + right_x) / 2.0
+        t = (bot_y - y) / (bot_y - vy)
+        cl = left_x + (vx - left_x) * t
+        cr = right_x + (vx - right_x) * t
+        return cl, cr
+
+    # ── paint ───────────────────────────────────────────────────────────
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-
-        bg = QLinearGradient(0, 0, 0, self.height())
-        bg.setColorAt(0.0, QColor(241, 245, 249))
-        bg.setColorAt(0.5, QColor(234, 239, 245))
-        bg.setColorAt(1.0, QColor(226, 232, 240))
-        painter.fillRect(self.rect(), bg)
 
         w = self.width()
         h = self.height()
         cx = w / 2.0
 
-        # Road surface glow
-        road_glow = QLinearGradient(cx - 90, 0, cx + 90, 0)
-        road_glow.setColorAt(0.0, QColor(255, 255, 255, 0))
-        road_glow.setColorAt(0.3, QColor(203, 213, 225, 50))
-        road_glow.setColorAt(0.5, QColor(186, 199, 214, 70))
-        road_glow.setColorAt(0.7, QColor(203, 213, 225, 50))
-        road_glow.setColorAt(1.0, QColor(255, 255, 255, 0))
-        painter.fillRect(QRectF(cx - 90, 30, 180, h - 130), road_glow)
+        card_area_h = 110
+        road_top = 0
+        road_bot = h - card_area_h
+        road_h = road_bot - road_top
 
-        # Lane lines
-        painter.setPen(QPen(QColor(186, 199, 214), 2))
-        lane_left = int(cx - 72)
-        lane_right = int(cx + 72)
-        painter.drawLine(lane_left, 40, lane_left, h - 110)
-        painter.drawLine(lane_right, 40, lane_right, h - 110)
+        # vanishing point
+        vx = cx + self._steer_angle * 2.8
+        vy = road_top + road_h * 0.22          # horizon line
 
-        painter.setPen(QPen(QColor(160, 175, 195), 2, Qt.DashLine))
-        painter.drawLine(int(cx), 40, int(cx), h - 110)
+        # road geometry
+        road_half = min(w * 0.32, 180.0)
+        curv = self._road_curvature            # px offset at horizon
 
-        car_w = 100.0
-        car_h = 195.0
-        cy = h / 2.0 - 20
-        body_x = cx - car_w / 2.0 + max(min(self.roll_deg, 22.0), -22.0) * 0.7
-        body_y = cy - car_h / 2.0 + max(min(self.pitch_deg, 22.0), -22.0) * 0.8
-        body = QRectF(body_x, body_y, car_w, car_h)
+        # helper: x-centre of road at a given depth t (0=bottom, 1=horizon)
+        def road_cx_at(t):
+            base = vx * t + cx * (1.0 - t) + self._steer_angle * 0.6 * (1.0 - t)
+            return base + curv * t * t
 
-        # Car body shadow
-        shadow = QRectF(body.left() + 4, body.top() + 6, car_w, car_h)
-        painter.setBrush(QColor(100, 116, 139, 40))
+        def road_half_at(t):
+            return road_half * (1.0 - t * 0.96)
+
+        # ── sky ────────────────────────────────────────────────────────
+        sky = QLinearGradient(0, road_top, 0, vy)
+        sky.setColorAt(0.0, QColor(15, 23, 42))
+        sky.setColorAt(0.4, QColor(30, 41, 59))
+        sky.setColorAt(1.0, QColor(51, 65, 85))
+        painter.fillRect(QRectF(0, road_top, w, vy - road_top), sky)
+
+        # horizon glow
+        glow = QLinearGradient(0, vy - 30, 0, vy + 20)
+        glow.setColorAt(0.0, QColor(99, 102, 241, 0))
+        glow.setColorAt(0.5, QColor(99, 102, 241, 50))
+        glow.setColorAt(1.0, QColor(99, 102, 241, 0))
+        painter.fillRect(QRectF(0, vy - 30, w, 50), glow)
+
+        # ── ground ─────────────────────────────────────────────────────
+        ground = QLinearGradient(0, vy, 0, road_bot)
+        ground.setColorAt(0.0, QColor(30, 41, 59))
+        ground.setColorAt(0.3, QColor(25, 34, 50))
+        ground.setColorAt(1.0, QColor(15, 23, 42))
+        painter.fillRect(QRectF(0, vy, w, road_bot - vy), ground)
+
+        # ── curved road surface (built from horizontal slices) ─────────
+        n_slices = 28
+        road_grad = QLinearGradient(0, vy, 0, road_bot)
+        road_grad.setColorAt(0.0, QColor(55, 65, 81))
+        road_grad.setColorAt(1.0, QColor(40, 50, 65))
         painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(shadow, 24, 24)
+        painter.setBrush(QBrush(road_grad))
 
-        # Car body
-        shell_grad = QLinearGradient(body.left(), body.top(), body.right(), body.bottom())
-        shell_grad.setColorAt(0.0, QColor(59, 130, 246))
-        shell_grad.setColorAt(0.3, QColor(37, 99, 235))
-        shell_grad.setColorAt(0.7, QColor(29, 78, 216))
-        shell_grad.setColorAt(1.0, QColor(30, 64, 175))
-        painter.setBrush(QBrush(shell_grad))
-        painter.setPen(QPen(QColor(96, 165, 250, 180), 1.5))
-        painter.drawRoundedRect(body, 24, 24)
+        # build curved road polygon: right edge top→bottom, then left edge bottom→top
+        right_pts = []
+        left_pts = []
+        for s in range(n_slices + 1):
+            t = s / float(n_slices)
+            y = road_bot - t * (road_bot - vy)
+            rcx = road_cx_at(t)
+            rh = road_half_at(t)
+            right_pts.append(QPointF(rcx + rh, y))
+            left_pts.append(QPointF(rcx - rh, y))
+        left_pts.reverse()
+        painter.drawPolygon(QPolygonF(right_pts + left_pts))
 
-        # Cabin
-        cabin = QRectF(body.left() + 12, body.top() + 20, car_w - 24, car_h - 64)
-        cabin_grad = QLinearGradient(cabin.left(), cabin.top(), cabin.left(), cabin.bottom())
-        cabin_grad.setColorAt(0.0, QColor(191, 219, 254, 200))
-        cabin_grad.setColorAt(1.0, QColor(147, 197, 253, 180))
+        # curved edge lines (white)
+        painter.setPen(QPen(QColor(200, 210, 220, 180), 2))
+        for pts in (left_pts[::-1], right_pts):
+            for j in range(len(pts) - 1):
+                a = min(200, int(60 + 160 * (1.0 - j / float(len(pts)))))
+                painter.setPen(QPen(QColor(200, 210, 220, a), max(1.0, 2.5 * (1.0 - j / float(len(pts))))))
+                painter.drawLine(pts[j], pts[j + 1])
+
+        # ── scrolling curved centre dashes ─────────────────────────────
+        n_dashes = 14
+        for i in range(n_dashes):
+            frac0 = (i * self._DASH_SPACING - self._road_offset) / (n_dashes * self._DASH_SPACING)
+            frac1 = frac0 + self._DASH_LEN_RATIO * self._DASH_SPACING / (n_dashes * self._DASH_SPACING)
+            if frac1 < 0 or frac0 > 1:
+                continue
+            frac0 = max(0.0, frac0)
+            frac1 = min(1.0, frac1)
+
+            # perspective compression
+            p0 = frac0 ** 1.6
+            p1 = frac1 ** 1.6
+
+            y0 = road_bot - p0 * (road_bot - vy)
+            y1 = road_bot - p1 * (road_bot - vy)
+            dash_x0 = road_cx_at(p0)
+            dash_x1 = road_cx_at(p1)
+
+            alpha = int(200 * (1.0 - (p0 + p1) / 2.0))
+            thickness = max(1.5, 3.0 * (1.0 - (p0 + p1) / 2.0))
+            painter.setPen(QPen(QColor(255, 255, 255, max(30, alpha)), thickness))
+            painter.drawLine(QPointF(dash_x0, y0), QPointF(dash_x1, y1))
+
+        # ── car body (3rd person, from behind) ─────────────────────────
+        car_w = min(120.0, w * 0.14)
+        car_h = car_w * 1.65
+        car_cx = cx + self._steer_angle * 0.3
+        car_bot = road_bot - 18
+        car_top = car_bot - car_h
+        car_left = car_cx - car_w / 2.0
+
+        # perspective tilt (subtle narrowing at top)
+        top_inset = car_w * 0.08
+        steer_skew = self._steer_angle * 0.4
+
+        # shadow
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 50))
+        shadow_poly = QPolygonF([
+            QPointF(car_left + top_inset + 4 + steer_skew, car_top + 5),
+            QPointF(car_left + car_w - top_inset + 4 + steer_skew, car_top + 5),
+            QPointF(car_left + car_w + 4, car_bot + 5),
+            QPointF(car_left + 4, car_bot + 5),
+        ])
+        painter.drawPolygon(shadow_poly)
+
+        # main body
+        body_poly = QPolygonF([
+            QPointF(car_left + top_inset + steer_skew, car_top),
+            QPointF(car_left + car_w - top_inset + steer_skew, car_top),
+            QPointF(car_left + car_w, car_bot),
+            QPointF(car_left, car_bot),
+        ])
+        body_grad = QLinearGradient(car_left, car_top, car_left, car_bot)
+        body_grad.setColorAt(0.0, QColor(37, 99, 235))
+        body_grad.setColorAt(0.4, QColor(29, 78, 216))
+        body_grad.setColorAt(1.0, QColor(30, 64, 175))
+        painter.setBrush(QBrush(body_grad))
+        painter.setPen(QPen(QColor(96, 165, 250, 140), 1.5))
+        painter.drawPolygon(body_poly)
+
+        # roof / cabin
+        cab_inset = car_w * 0.14
+        cab_top = car_top + car_h * 0.08
+        cab_bot = car_bot - car_h * 0.30
+        cab_left = car_left + cab_inset
+        cab_right = car_left + car_w - cab_inset
+        cab_top_inset = car_w * 0.04
+        cabin_poly = QPolygonF([
+            QPointF(cab_left + cab_top_inset + steer_skew * 0.6, cab_top),
+            QPointF(cab_right - cab_top_inset + steer_skew * 0.6, cab_top),
+            QPointF(cab_right, cab_bot),
+            QPointF(cab_left, cab_bot),
+        ])
+        cabin_grad = QLinearGradient(cab_left, cab_top, cab_left, cab_bot)
+        cabin_grad.setColorAt(0.0, QColor(165, 200, 255, 200))
+        cabin_grad.setColorAt(1.0, QColor(120, 170, 240, 160))
         painter.setBrush(QBrush(cabin_grad))
-        painter.setPen(QPen(QColor(255, 255, 255, 120), 1.5))
-        painter.drawRoundedRect(cabin, 18, 18)
+        painter.setPen(QPen(QColor(255, 255, 255, 100), 1))
+        painter.drawPolygon(cabin_poly)
 
-        # Wheels
-        wheel_color = QColor(51, 65, 85)
-        wheel_glow = QColor(234, 88, 12) if self.moving else QColor(37, 99, 235)
+        # tail lights
+        light_w = car_w * 0.18
+        light_h = car_h * 0.035
+        light_y = car_bot - light_h - 3
+        is_braking = (self.left_power < 0 and self.right_power < 0) or \
+                     (abs(self.left_power) < 5 and abs(self.right_power) < 5)
+        brake_color = QColor(255, 50, 50, 220) if is_braking else QColor(180, 30, 30, 160)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(brake_color)
+        painter.drawRoundedRect(QRectF(car_left + 4, light_y, light_w, light_h), 3, 3)
+        painter.drawRoundedRect(QRectF(car_left + car_w - light_w - 4, light_y, light_w, light_h), 3, 3)
+
+        # brake light glow
+        if is_braking:
+            painter.setBrush(QColor(255, 60, 60, 40))
+            painter.drawEllipse(QPointF(car_left + 4 + light_w / 2, light_y + light_h / 2), light_w, light_w * 0.8)
+            painter.drawEllipse(QPointF(car_left + car_w - 4 - light_w / 2, light_y + light_h / 2), light_w, light_w * 0.8)
+
+        # wheels (four)
+        wh_w = car_w * 0.10
+        wh_h = car_h * 0.16
+        wheel_color = QColor(30, 30, 35)
+        moving_glow = QColor(234, 88, 12) if self.moving else QColor(80, 90, 110)
         painter.setBrush(wheel_color)
-        painter.setPen(QPen(wheel_glow, 2))
-        wheel_rects = [
-            QRectF(body.left() - 13, body.top() + 22, 13, 44),
-            QRectF(body.right(), body.top() + 22, 13, 44),
-            QRectF(body.left() - 13, body.bottom() - 66, 13, 44),
-            QRectF(body.right(), body.bottom() - 66, 13, 44),
-        ]
-        for wheel in wheel_rects:
-            painter.drawRoundedRect(wheel, 6, 6)
+        painter.setPen(QPen(moving_glow, 1.5))
+        # front wheels (top, slightly narrower due to perspective)
+        fw_y = car_top + car_h * 0.10
+        painter.drawRoundedRect(QRectF(car_left - wh_w + steer_skew * 0.3, fw_y, wh_w, wh_h), 3, 3)
+        painter.drawRoundedRect(QRectF(car_left + car_w + steer_skew * 0.3, fw_y, wh_w, wh_h), 3, 3)
+        # rear wheels
+        rw_y = car_bot - wh_h - car_h * 0.06
+        painter.drawRoundedRect(QRectF(car_left - wh_w, rw_y, wh_w, wh_h), 3, 3)
+        painter.drawRoundedRect(QRectF(car_left + car_w, rw_y, wh_w, wh_h), 3, 3)
 
-        # Energy ring
-        accel_mag = min((self.accel[0] ** 2 + self.accel[1] ** 2 + self.accel[2] ** 2) ** 0.5, 2.0)
-        ring_color = QColor(234, 88, 12, 60) if self.moving else QColor(37, 99, 235, 45)
-        painter.setBrush(Qt.NoBrush)
-        painter.setPen(QPen(ring_color, 5))
-        painter.drawEllipse(QRectF(
-            cx - 82 - accel_mag * 12, body.top() - 16 - accel_mag * 7,
-            164 + accel_mag * 24, 228 + accel_mag * 14
-        ))
-
-        # Outer subtle ring
-        painter.setPen(QPen(QColor(ring_color.red(), ring_color.green(), ring_color.blue(), 18), 10))
-        painter.drawEllipse(QRectF(
-            cx - 90 - accel_mag * 14, body.top() - 24 - accel_mag * 8,
-            180 + accel_mag * 28, 244 + accel_mag * 16
-        ))
-
-        title_font_size = 18 if w >= 720 else 15
+        # ── HUD overlay ────────────────────────────────────────────────
+        title_font_size = 16 if w >= 720 else 13
         status_font_size = 10 if w >= 720 else 9
-        metric_value_font_size = 22 if w >= 720 else 17
+        metric_value_font_size = 20 if w >= 720 else 16
         metric_unit_font_size = 9 if w >= 720 else 8
 
-        # Title
-        painter.setPen(QColor(30, 41, 59))
-        painter.setFont(QFont("Segoe UI", title_font_size, QFont.Bold))
-        painter.drawText(36, 42, "Vehicle Visualization")
+        # semi-transparent title bar
+        painter.fillRect(QRectF(0, 0, w, 80), QColor(15, 23, 42, 180))
 
-        # Status badges
+        painter.setPen(QColor(226, 232, 240))
+        painter.setFont(QFont("Segoe UI", title_font_size, QFont.Bold))
+        painter.drawText(24, 32, "Vehicle Visualization")
+
+        # status badges
         painter.setFont(QFont("Segoe UI", status_font_size, QFont.DemiBold))
         status = "CONNECTED" if self.connected else "DISCONNECTED"
-        motion = "MOVING" if self.moving else "STABLE"
 
-        # Connected badge background
-        badge_y = 52
+        badge_y = 46
         badge_h = 22
         badge_radius = 11
 
-        status_color = QColor(22, 163, 74) if self.connected else QColor(220, 38, 38)
-        status_bg = QColor(status_color.red(), status_color.green(), status_color.blue(), 30)
-        status_w = max(110, len(status) * 10 + 24)
+        status_color = QColor(74, 222, 128) if self.connected else QColor(248, 113, 113)
+        status_bg = QColor(status_color.red(), status_color.green(), status_color.blue(), 50)
+        status_w = max(110, len(status) * 9 + 24)
         painter.setPen(Qt.NoPen)
         painter.setBrush(status_bg)
-        painter.drawRoundedRect(QRectF(36, badge_y, status_w, badge_h), badge_radius, badge_radius)
+        painter.drawRoundedRect(QRectF(24, badge_y, status_w, badge_h), badge_radius, badge_radius)
         painter.setPen(status_color)
-        painter.drawText(QRectF(36, badge_y, status_w, badge_h), Qt.AlignCenter, status)
+        painter.drawText(QRectF(24, badge_y, status_w, badge_h), Qt.AlignCenter, status)
 
-        motion_color = QColor(234, 88, 12) if self.moving else QColor(37, 99, 235)
-        motion_bg = QColor(motion_color.red(), motion_color.green(), motion_color.blue(), 25)
-        motion_w = max(90, len(motion) * 10 + 24)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(motion_bg)
-        painter.drawRoundedRect(QRectF(36 + status_w + 10, badge_y, motion_w, badge_h), badge_radius, badge_radius)
-        painter.setPen(motion_color)
-        painter.drawText(QRectF(36 + status_w + 10, badge_y, motion_w, badge_h), Qt.AlignCenter, motion)
-
-        # Direction badge
+        # direction badge
         motion = compute_motion_state(self.left_power, self.right_power)
         dir_label = motion['direction'].replace('_', ' ').upper()
         dir_color_map = {
-            'FORWARD':    QColor(22, 163, 74),
-            'REVERSE':    QColor(220, 38, 38),
-            'TURN RIGHT': QColor(234, 88, 12),
-            'TURN LEFT':  QColor(234, 88, 12),
-            'SPIN RIGHT': QColor(168, 85, 247),
-            'SPIN LEFT':  QColor(168, 85, 247),
-            'STOPPED':    QColor(100, 116, 139),
+            'FORWARD':    QColor(74, 222, 128),
+            'REVERSE':    QColor(248, 113, 113),
+            'TURN RIGHT': QColor(251, 146, 60),
+            'TURN LEFT':  QColor(251, 146, 60),
+            'SPIN RIGHT': QColor(192, 132, 252),
+            'SPIN LEFT':  QColor(192, 132, 252),
+            'STOPPED':    QColor(148, 163, 184),
         }
-        dir_color = dir_color_map.get(dir_label, QColor(100, 116, 139))
-        dir_bg = QColor(dir_color.red(), dir_color.green(), dir_color.blue(), 28)
-        dir_w = max(110, len(dir_label) * 10 + 24)
-        dir_x = 36 + status_w + 10 + motion_w + 10
+        dir_color = dir_color_map.get(dir_label, QColor(148, 163, 184))
+        dir_bg = QColor(dir_color.red(), dir_color.green(), dir_color.blue(), 50)
+        dir_w = max(110, len(dir_label) * 9 + 24)
+        dir_x = 24 + status_w + 10
         painter.setPen(Qt.NoPen)
         painter.setBrush(dir_bg)
         painter.drawRoundedRect(QRectF(dir_x, badge_y, dir_w, badge_h), badge_radius, badge_radius)
         painter.setPen(dir_color)
         painter.drawText(QRectF(dir_x, badge_y, dir_w, badge_h), Qt.AlignCenter, dir_label)
 
-        # Metric cards
-        card_y = h - 142
-        card_h = 92
-        card_w = (w - 92) / 4.0
+        # speed display (large, right side)
+        speed_val = abs(motion['linear_vel_cms'])
+        painter.setPen(QColor(255, 255, 255, 230))
+        painter.setFont(QFont("Segoe UI", 32 if w >= 720 else 24, QFont.Bold))
+        painter.drawText(QRectF(w - 220, 6, 200, 44), Qt.AlignRight | Qt.AlignVCenter,
+                         f"{speed_val:.1f}")
+        painter.setFont(QFont("Segoe UI", 11, QFont.DemiBold))
+        painter.setPen(QColor(148, 163, 184))
+        painter.drawText(QRectF(w - 220, 48, 200, 20), Qt.AlignRight | Qt.AlignVCenter, "cm/s")
+
+        # ── metric cards (bottom bar) ──────────────────────────────────
+        card_y = road_bot + 6
+        card_h = card_area_h - 16
+        num_cards = 6
+        card_w = (w - 20 - (num_cards - 1) * 8) / float(num_cards)
         metrics = [
             ("Roll",  self.roll_deg,                 "deg",  QColor(124, 58, 237)),
             ("Pitch", self.pitch_deg,                "deg",  QColor(37, 99, 235)),
             ("Speed", motion['linear_vel_cms'],      "cm/s", QColor(5, 150, 105)),
             ("Angle", motion['turn_angle_deg'],      "deg",  QColor(220, 38, 38)),
+            ("L-Pwr", float(self.left_power),        "%",    QColor(234, 88, 12)),
+            ("R-Pwr", float(self.right_power),       "%",    QColor(14, 165, 233)),
         ]
 
+        # dark card bar background
+        painter.fillRect(QRectF(0, road_bot, w, card_area_h), QColor(15, 23, 42, 220))
+
         for index, (label, value, unit, accent) in enumerate(metrics):
-            left = 20 + index * (card_w + 10)
+            left = 10 + index * (card_w + 8)
             rect = QRectF(left, card_y, card_w, card_h)
 
-            # Card background — white with subtle shadow effect
             card_grad = QLinearGradient(rect.left(), rect.top(), rect.left(), rect.bottom())
-            card_grad.setColorAt(0.0, QColor(255, 255, 255, 240))
-            card_grad.setColorAt(1.0, QColor(248, 250, 252, 240))
+            card_grad.setColorAt(0.0, QColor(30, 41, 59, 230))
+            card_grad.setColorAt(1.0, QColor(22, 30, 48, 230))
             painter.setBrush(QBrush(card_grad))
-            painter.setPen(QPen(QColor(203, 213, 225), 1))
-            painter.drawRoundedRect(rect, 14, 14)
+            painter.setPen(QPen(QColor(55, 65, 81), 1))
+            painter.drawRoundedRect(rect, 10, 10)
 
-            # Accent top line
+            # accent top line
             painter.setPen(QPen(accent, 2))
             painter.drawLine(
-                int(rect.left() + 14), int(rect.top() + 1),
-                int(rect.right() - 14), int(rect.top() + 1)
+                int(rect.left() + 10), int(rect.top() + 1),
+                int(rect.right() - 10), int(rect.top() + 1)
             )
 
-            # Label
-            painter.setPen(accent)
+            # label
+            painter.setPen(QColor(accent.red(), accent.green(), accent.blue(), 200))
             painter.setFont(QFont("Segoe UI", metric_unit_font_size, QFont.DemiBold))
-            painter.drawText(QRectF(rect.left() + 16, rect.top() + 12, rect.width() - 32, 18),
+            painter.drawText(QRectF(rect.left() + 10, rect.top() + 8, rect.width() - 20, 16),
                              Qt.AlignLeft | Qt.AlignVCenter, label.upper())
 
-            # Value
-            painter.setPen(QColor(15, 23, 42))
+            # value
+            painter.setPen(QColor(226, 232, 240))
             painter.setFont(QFont("Segoe UI", metric_value_font_size, QFont.Bold))
-            value_rect = QRectF(rect.left() + 16, rect.top() + 34, rect.width() - 64, 36)
+            value_rect = QRectF(rect.left() + 10, rect.top() + 28, rect.width() - 50, 32)
             painter.drawText(value_rect, Qt.AlignLeft | Qt.AlignVCenter, f"{value:.1f}")
 
-            # Unit
+            # unit
             painter.setPen(QColor(100, 116, 139))
             painter.setFont(QFont("Segoe UI", metric_unit_font_size))
-            unit_rect = QRectF(rect.right() - 48, rect.top() + 40, 32, 22)
+            unit_rect = QRectF(rect.right() - 42, rect.top() + 34, 32, 20)
             painter.drawText(unit_rect, Qt.AlignRight | Qt.AlignVCenter, unit)
 
 
@@ -627,7 +790,7 @@ class ImuGui(QWidget):
         self.worker = None
         self.logger = CsvLogger()
 
-        self.max_samples = 300
+        self.max_samples = 1000
         self.sample_counter = 0
         self.packet_count = 0
         self.last_good_port = ""
@@ -663,11 +826,20 @@ class ImuGui(QWidget):
         self.gyro_bias = {"gx": 0.0, "gy": 0.0, "gz": 0.0}
 
         self.latest_raw = None
+        self.streaming_started = False
+        self._gui_dirty = False
+        self._cached_texts = {}       # label key → last setText value
+        self._cached_styles = {}      # widget id → last setStyleSheet value
 
         self.init_ui()
         self.data_log_timer = QTimer()
         self.data_log_timer.timeout.connect(self._append_data_log)
         self.data_log_timer.start(1000)
+
+        # 30 Hz GUI repaint timer
+        self._gui_timer = QTimer()
+        self._gui_timer.timeout.connect(self._flush_gui)
+        self._gui_timer.start(33)
         self.pathfinder_tab.set_shared_serial_host(self)
         self.refresh_ports()
         self.update_alpha_label()
@@ -730,6 +902,7 @@ class ImuGui(QWidget):
         self.status_label.setStyleSheet("font-weight: bold; color: #6b7280;")
         self.console = QTextEdit()
         self.console.setMaximumHeight(250)
+        self.console.document().setMaximumBlockCount(500)
 
         self.labels = {}
         rows = [
@@ -977,24 +1150,57 @@ class ImuGui(QWidget):
             self.stream_btn.setText("Stream ON")
             self.append_console("Sent STREAM_OFF")
 
+    def _reset_display(self):
+        """Zero all IMU displays, clear plots, and reset power."""
+        self.clear_plots()
+        self.left_power = 0
+        self.right_power = 0
+        self.labels["left_power"].setText("0")
+        self.labels["right_power"].setText("0")
+        for key in ["ax", "ay", "az", "gx", "gy", "gz",
+                     "roll", "pitch", "imu_roll", "imu_pitch",
+                     "accel_roll", "accel_pitch", "sample_rate"]:
+            self.labels[key].setText("0")
+        self.filtered_roll = 0.0
+        self.filtered_pitch = 0.0
+        self.last_time = None
+        self.pending_packet = {}
+        self.robot_visual.set_vehicle_state(0, 0, (0, 0, 0), (0, 0, 0), True, False, 0, 0)
+
     def handle_ble_line(self, line):
         self.pathfinder_tab.handle_serial_line(line)
+
+        # Handle button messages: "btn,start" / "btn,pause" / "btn,reset"
+        btn_match = re.match(r"btn,(\w+)", line)
+        if btn_match:
+            btn = btn_match.group(1)
+            if btn == "start":
+                self.streaming_started = True
+                self.append_console("Received START — updates enabled")
+            elif btn == "reset":
+                self.streaming_started = False
+                self._reset_display()
+                self.append_console("Received RESET — display zeroed")
+            elif btn == "pause":
+                self.append_console("Received PAUSE")
+            return
 
         # Parse motor power: "pwr,<0|1>,<signed_int>"
         pwr_match = re.match(r"pwr,([01]),([-\d]+)", line)
         if pwr_match:
+            if not self.streaming_started:
+                return
             which = int(pwr_match.group(1))
             value = int(pwr_match.group(2))
             if which == 0:
                 self.left_power = value
-                self.labels["left_power"].setText(str(value))
             else:
                 self.right_power = value
-                self.labels["right_power"].setText(str(value))
+            self._gui_dirty = True
             return
 
         parsed = self.parse_line(line)
-        if parsed is not None:
+        if parsed is not None and self.streaming_started:
             self.handle_data(parsed)
 
     # LSM6DS33 default full-scale sensitivities
@@ -1134,6 +1340,28 @@ class ImuGui(QWidget):
     def update_orientation_curve_visibility(self):
         self.robot_visual.update()
 
+    # ---- Helpers: skip redundant widget updates ----
+    def _set_label(self, key, text):
+        """setText on self.labels[key] only when the value has changed."""
+        if self._cached_texts.get(key) != text:
+            self._cached_texts[key] = text
+            self.labels[key].setText(text)
+
+    def _set_style(self, widget, style):
+        """setStyleSheet only when the value has changed."""
+        wid = id(widget)
+        if self._cached_styles.get(wid) != style:
+            self._cached_styles[wid] = style
+            widget.setStyleSheet(style)
+
+    def _set_text(self, widget, text):
+        """setText on any widget only when the value has changed."""
+        wid = id(widget)
+        key = ("__wtext__", wid)
+        if self._cached_texts.get(key) != text:
+            self._cached_texts[key] = text
+            widget.setText(text)
+
     def handle_data(self, d):
         now = time.time()
 
@@ -1186,30 +1414,13 @@ class ImuGui(QWidget):
             self.filtered_pitch = alpha * gyro_pitch + (1.0 - alpha) * accel_pitch
             roll = self.filtered_roll
             pitch = self.filtered_pitch
-            self.filter_indicator.setText("Complementary Filter")
         else:
             roll = imu_roll_raw
             pitch = imu_pitch_raw
             self.filtered_roll = roll
             self.filtered_pitch = pitch
-            self.filter_indicator.setText("IMU Angles")
 
-        self.labels["ax"].setText(f"{ax:.3f}")
-        self.labels["ay"].setText(f"{ay:.3f}")
-        self.labels["az"].setText(f"{az:.3f}")
-        self.labels["gx"].setText(f"{gx:.3f}")
-        self.labels["gy"].setText(f"{gy:.3f}")
-        self.labels["gz"].setText(f"{gz:.3f}")
-        self.labels["roll"].setText(f"{roll:.2f}")
-        self.labels["pitch"].setText(f"{pitch:.2f}")
-        self.labels["imu_roll"].setText(f"{imu_roll_raw:.2f}")
-        self.labels["imu_pitch"].setText(f"{imu_pitch_raw:.2f}")
-        self.labels["accel_roll"].setText(f"{accel_roll:.2f}")
-        self.labels["accel_pitch"].setText(f"{accel_pitch:.2f}")
-        self.labels["sample_rate"].setText(f"{sample_rate:.1f} Hz")
-        self.labels["packets"].setText(str(self.packet_count))
-        self.labels["last_packet"].setText("0.00 s ago")
-
+        # Accumulate data into buffers (always, regardless of GUI throttle)
         self.sample_counter += 1
         self.t.append(self.sample_counter)
 
@@ -1230,20 +1441,18 @@ class ImuGui(QWidget):
         self.accel_roll_data.append(accel_roll)
         self.accel_pitch_data.append(accel_pitch)
 
-        self.update_motion_indicator(ax, ay, az, gx, gy, gz)
-        self.check_tilt_alarm(roll, pitch)
-        self.robot_visual.set_vehicle_state(
-            roll,
-            pitch,
-            (ax, ay, az),
-            (gx, gy, gz),
-            self.connection_indicator.text() == "Connected",
-            self.motion_indicator.text() == "Moving",
-            self.left_power,
-            self.right_power,
-        )
-        self.update_plots()
+        # Store latest computed values for deferred GUI update
+        self._latest_computed = {
+            "ax": ax, "ay": ay, "az": az,
+            "gx": gx, "gy": gy, "gz": gz,
+            "roll": roll, "pitch": pitch,
+            "imu_roll": imu_roll_raw, "imu_pitch": imu_pitch_raw,
+            "accel_roll": accel_roll, "accel_pitch": accel_pitch,
+            "sample_rate": sample_rate,
+        }
+        self._gui_dirty = True
 
+        # Logging is not deferred — write every packet
         if self.logger.active:
             ts = datetime.now().isoformat(timespec="milliseconds")
             self.logger.log(
@@ -1256,39 +1465,85 @@ class ImuGui(QWidget):
                 self.packet_count
             )
 
-    def update_motion_indicator(self, ax, ay, az, gx, gy, gz):
+    # ---- 30 Hz GUI flush (called by _gui_timer) ----
+    def _flush_gui(self):
+        if not self._gui_dirty:
+            return
+        self._gui_dirty = False
+
+        c = self._latest_computed
+
+        self._set_label("ax", f"{c['ax']:.3f}")
+        self._set_label("ay", f"{c['ay']:.3f}")
+        self._set_label("az", f"{c['az']:.3f}")
+        self._set_label("gx", f"{c['gx']:.3f}")
+        self._set_label("gy", f"{c['gy']:.3f}")
+        self._set_label("gz", f"{c['gz']:.3f}")
+        self._set_label("roll", f"{c['roll']:.2f}")
+        self._set_label("pitch", f"{c['pitch']:.2f}")
+        self._set_label("imu_roll", f"{c['imu_roll']:.2f}")
+        self._set_label("imu_pitch", f"{c['imu_pitch']:.2f}")
+        self._set_label("accel_roll", f"{c['accel_roll']:.2f}")
+        self._set_label("accel_pitch", f"{c['accel_pitch']:.2f}")
+        self._set_label("sample_rate", f"{c['sample_rate']:.1f} Hz")
+        self._set_label("packets", str(self.packet_count))
+        self._set_label("last_packet", "0.00 s ago")
+        self._set_label("left_power", str(self.left_power))
+        self._set_label("right_power", str(self.right_power))
+
+        if self.comp_filter_checkbox.isChecked():
+            self._set_text(self.filter_indicator, "Complementary Filter")
+        else:
+            self._set_text(self.filter_indicator, "IMU Angles")
+
+        self._update_motion_indicator(
+            c['ax'], c['ay'], c['az'], c['gx'], c['gy'], c['gz'])
+        self._check_tilt_alarm(c['roll'], c['pitch'])
+        self.robot_visual.set_vehicle_state(
+            c['roll'],
+            c['pitch'],
+            (c['ax'], c['ay'], c['az']),
+            (c['gx'], c['gy'], c['gz']),
+            self.connection_indicator.text() == "Connected",
+            self.motion_indicator.text() == "Moving",
+            self.left_power,
+            self.right_power,
+        )
+        self.update_plots()
+
+    def _update_motion_indicator(self, ax, ay, az, gx, gy, gz):
         acc_mag = math.sqrt(ax * ax + ay * ay + az * az)
         gyro_mag = math.sqrt(gx * gx + gy * gy + gz * gz)
         thresh = self.motion_thresh.value()
 
         if abs(acc_mag - 1.0) > 0.15 or gyro_mag > thresh:
-            self.motion_indicator.setText("Moving")
-            self.motion_indicator.setStyleSheet("font-weight: bold; color: #fb923c;")
+            self._set_text(self.motion_indicator, "Moving")
+            self._set_style(self.motion_indicator, "font-weight: bold; color: #fb923c;")
         else:
-            self.motion_indicator.setText("Stationary")
-            self.motion_indicator.setStyleSheet("font-weight: bold; color: #22c55e;")
+            self._set_text(self.motion_indicator, "Stationary")
+            self._set_style(self.motion_indicator, "font-weight: bold; color: #22c55e;")
 
-    def check_tilt_alarm(self, roll, pitch):
+    def _check_tilt_alarm(self, roll, pitch):
         if not self.tilt_alarm_checkbox.isChecked():
-            self.tilt_indicator.setText("Alarm Disabled")
-            self.tilt_indicator.setStyleSheet("font-weight: bold; color: #6b7280;")
+            self._set_text(self.tilt_indicator, "Alarm Disabled")
+            self._set_style(self.tilt_indicator, "font-weight: bold; color: #6b7280;")
             return
 
         roll_limit = self.roll_thresh.value()
         pitch_limit = self.pitch_thresh.value()
 
         if abs(roll) > roll_limit or abs(pitch) > pitch_limit:
-            self.tilt_indicator.setText("TILT ALARM")
-            self.tilt_indicator.setStyleSheet("font-weight: bold; color: #ef4444;")
+            self._set_text(self.tilt_indicator, "TILT ALARM")
+            self._set_style(self.tilt_indicator, "font-weight: bold; color: #ef4444;")
             if self.connection_indicator.text() == "Connected":
-                self.status_label.setText("Status: TILT ALARM")
-                self.status_label.setStyleSheet("font-weight: bold; color: #ef4444;")
+                self._set_text(self.status_label, "Status: TILT ALARM")
+                self._set_style(self.status_label, "font-weight: bold; color: #ef4444;")
         else:
-            self.tilt_indicator.setText("No Alarm")
-            self.tilt_indicator.setStyleSheet("font-weight: bold; color: #22c55e;")
+            self._set_text(self.tilt_indicator, "No Alarm")
+            self._set_style(self.tilt_indicator, "font-weight: bold; color: #22c55e;")
             if self.connection_indicator.text() == "Connected":
-                self.status_label.setText("Status: Connected")
-                self.status_label.setStyleSheet("font-weight: bold; color: #22c55e;")
+                self._set_text(self.status_label, "Status: Connected")
+                self._set_style(self.status_label, "font-weight: bold; color: #22c55e;")
 
     def update_plots(self):
         return
