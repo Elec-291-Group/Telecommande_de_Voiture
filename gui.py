@@ -362,6 +362,15 @@ class RobotVisualizationWidget(QWidget):
         self.moving = False
         self.left_power = 0
         self.right_power = 0
+        self.road_offset = 0.0
+        self._anim_timer = QTimer(self)
+        self._anim_timer.timeout.connect(self._tick)
+        self._anim_timer.start(30)
+
+    def _tick(self):
+        speed = (abs(self.left_power) + abs(self.right_power)) / 2.0
+        self.road_offset = (self.road_offset + speed * 0.15) % 16
+        self.update()
 
     def set_vehicle_state(self, roll_deg, pitch_deg, accel, gyro, connected, moving, left_power, right_power):
         self.roll_deg = roll_deg
@@ -404,7 +413,11 @@ class RobotVisualizationWidget(QWidget):
         painter.drawLine(lane_left, 40, lane_left, h - 110)
         painter.drawLine(lane_right, 40, lane_right, h - 110)
 
-        painter.setPen(QPen(QColor(160, 175, 195), 2, Qt.DashLine))
+        center_pen = QPen(QColor(160, 175, 195), 2)
+        center_pen.setStyle(Qt.CustomDashLine)
+        center_pen.setDashPattern([8, 8])
+        center_pen.setDashOffset(self.road_offset)
+        painter.setPen(center_pen)
         painter.drawLine(int(cx), 40, int(cx), h - 110)
 
         car_w = 100.0
