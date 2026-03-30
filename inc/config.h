@@ -28,8 +28,10 @@
 
 
 // IR RX Command bytes (STM32 TX -> EFM8 RX)
-#define IR_RX_CMD_DATA_RECEIVED   0   // val: 0x00=field tracking, 0x01=auto, 0x02=path tracking
-#define IR_RX_CMD_CROSSING_ACTION 1   // val: 0x00=straight, 0x01=left, 0x02=right, 0x03=stop
+#define IR_RX_CMD_DATA_RECEIVED   25   // val: 0x00=field tracking, 0x01=auto, 0x02=path tracking
+#define IR_RX_CMD_CROSSING_ACTION 26   // val: 0x00=straight, 0x01=left, 0x02=right, 0x03=stop
+#define IR_RX_CMD_LEFT_POWER      27  // val: high byte=positive part, low byte=negative part (abs)
+#define IR_RX_CMD_RIGHT_POWER     28  // val: high byte=positive part, low byte=negative part (abs)
 
 // ---- IMU register array indices (0-17 → imu_regs[]) ----
 #define IMU_CMD_BASE        7   /* command byte offset for IMU registers */

@@ -14,6 +14,8 @@
 unsigned char crossing_action   = 0;
 static unsigned char intersection_num = 0;
 static bit           crossing_updated = 0;
+signed char left_power  = 0;
+signed char right_power = 0;
 
 void InitPinADC (unsigned char portno, unsigned char pinno)
 {
@@ -136,6 +138,22 @@ void IR_RX_decode_command(const IR_Frame_t *frame)
                 crossing_updated = 1;
             }
             break;
+
+        case IR_RX_CMD_LEFT_POWER:
+        {
+            unsigned char byte1 = (frame->val >> 8) & 0xFF;
+            unsigned char byte2 = frame->val & 0xFF;
+            left_power = (byte1 > 0) ? (signed char)byte1 : -((signed char)byte2);
+            break;
+        }
+
+        case IR_RX_CMD_RIGHT_POWER:
+        {
+            unsigned char byte1 = (frame->val >> 8) & 0xFF;
+            unsigned char byte2 = frame->val & 0xFF;
+            right_power = (byte1 > 0) ? (signed char)byte1 : -((signed char)byte2);
+            break;
+        }
 
         default:
             break;

@@ -77,6 +77,23 @@ static void Bluetooth_stream_imu_frame(const IR_Frame_t *frame)
 	UART1_send_string("\r\n");
 }
 
+extern signed char left_power;
+extern signed char right_power;
+
+static void Bluetooth_stream_power(unsigned char which, signed char power)
+{
+	UART1_send_string("pwr,");
+	UART1_send_char(which ? '1' : '0');
+	UART1_send_char(',');
+	if (power < 0) {
+		UART1_send_char('-');
+		UART1_send_uint((unsigned int)(unsigned char)(-power));
+	} else {
+		UART1_send_uint((unsigned int)(unsigned char)power);
+	}
+	UART1_send_string("\r\n");
+}
+
 static void Bluetooth_handle_path_command(const char *cmd_text)
 {
 	char *path_token;
@@ -213,6 +230,18 @@ void Bluetooth_forward_imu(void)
             bluetooth_rx_frame.cmd < IMU_CMD_BASE + IMU_REG_COUNT)
         {
             Bluetooth_stream_imu_frame(&bluetooth_rx_frame);
+        }
+
+        if (bluetooth_stream_enabled &&
+            bluetooth_rx_frame.cmd == IR_RX_CMD_LEFT_POWER)
+        {
+            Bluetooth_stream_power(0, left_power);
+        }
+
+        if (bluetooth_stream_enabled &&
+            bluetooth_rx_frame.cmd == IR_RX_CMD_RIGHT_POWER)
+        {
+            Bluetooth_stream_power(1, right_power);
         }
     }
 }

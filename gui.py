@@ -595,6 +595,9 @@ class ImuGui(QWidget):
         self.imu_roll_data = deque(maxlen=self.max_samples)
         self.imu_pitch_data = deque(maxlen=self.max_samples)
 
+        self.left_power = 0
+        self.right_power = 0
+
         self.filtered_roll = 0.0
         self.filtered_pitch = 0.0
         self.last_time = None
@@ -670,6 +673,7 @@ class ImuGui(QWidget):
             "roll", "pitch", "imu_roll", "imu_pitch",
             "accel_roll", "accel_pitch", "sample_rate",
             "packets", "last_packet",
+            "left_power", "right_power",
         ]
         for key in rows:
             self.labels[key] = _styled_value_label()
@@ -883,6 +887,20 @@ class ImuGui(QWidget):
 
     def handle_ble_line(self, line):
         self.pathfinder_tab.handle_serial_line(line)
+
+        # Parse motor power: "pwr,<0|1>,<signed_int>"
+        pwr_match = re.match(r"pwr,([01]),([-\d]+)", line)
+        if pwr_match:
+            which = int(pwr_match.group(1))
+            value = int(pwr_match.group(2))
+            if which == 0:
+                self.left_power = value
+                self.labels["left_power"].setText(str(value))
+            else:
+                self.right_power = value
+                self.labels["right_power"].setText(str(value))
+            return
+
         parsed = self.parse_line(line)
         if parsed is not None:
             self.handle_data(parsed)
