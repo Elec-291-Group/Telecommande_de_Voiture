@@ -1159,10 +1159,13 @@ class ImuGui(QWidget):
         gz_raw = d["gz"]
 
         imu_roll_raw = d.get("imu_roll", 0.0)
+        imu_roll_raw += 180
+        if imu_roll_raw > 180:
+            imu_roll_raw -= 360
         imu_pitch_raw = d.get("imu_pitch", 0.0)
 
         ax = ax_raw - self.accel_bias["ax"]
-        ay = ay_raw - self.accel_bias["ay"]
+        ay = -(ay_raw - self.accel_bias["ay"])   # invert Y: IMU is upside down
         az = az_raw - self.accel_bias["az"]
 
         gx = gx_raw - self.gyro_bias["gx"]
@@ -1170,6 +1173,10 @@ class ImuGui(QWidget):
         gz = gz_raw - self.gyro_bias["gz"]
 
         accel_roll, accel_pitch = compute_roll_pitch(ax, ay, az)
+        # Normalize roll: IMU upside down reads ±180° when flat → offset to 0°
+        accel_roll += 180
+        if accel_roll > 180:
+            accel_roll -= 360
 
         if self.comp_filter_checkbox.isChecked():
             alpha = self.alpha_slider.value() / 100.0

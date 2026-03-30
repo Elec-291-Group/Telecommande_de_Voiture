@@ -293,4 +293,6 @@ void Bluetooth_forward_imu(void)
         periodic_frame.addr = IR_ADDR2;
         Bluetooth_stream_imu_frame(&periodic_frame);
     }
+    Bluetooth_stream_power(0, left_power);
+    Bluetooth_stream_power(1, right_power);
 }
