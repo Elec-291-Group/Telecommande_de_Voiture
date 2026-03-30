@@ -17,6 +17,7 @@ typedef enum {
     LCD_S14,     // Ready to IR TX (Remote) — PB_TXCMD: mode, PB_START: start→S6, ir start cmd
     LCD_S15,     // Ready to IR TX (BT path) — PB_TXCMD: mode, waypoints, PB_START: start→S11, ir start cmd
     LCD_S17,     // Manual intersection setup (Auto/Manual submode)
+    LCD_S18,     // Ready to IR TX (Manual path) — PB_TXCMD: mode+manul_path, PB_START: start→S5
     LCD_NUM_STATES
 } lcd_state_t;
 
@@ -27,10 +28,10 @@ extern unsigned char  active_mode;     // locked in at start: 0=auto, 1=remote, 
 extern unsigned char  active_path;     // locked in at start: 0=path1, 1=path2, 2=path3, 3=manual
 extern unsigned char  manual_int_idx;  // current intersection being configured (0-7)
 extern unsigned char  manual_dir;      // currently selected direction (0=fwd,1=left,2=right,3=stop)
+extern unsigned int   manual_path_buf; // packed 16-bit: 2 bits per intersection (int0 in [1:0], int7 in [15:14])
 
 void LCD_FSM_init(void);
 void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte);
 void LCD_FSM_pause(lcd_state_t from_state);
-void LCD_FSM_s17_advance(void); /* advance to next intersection and redraw */
 
 #endif

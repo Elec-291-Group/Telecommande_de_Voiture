@@ -16,11 +16,11 @@ unsigned char active_mode   = 0;   // locked in when running starts: 0=auto, 1=r
 unsigned char active_path   = 0;   // locked in when running starts: 0=path1, 1=path2, 2=path3, 3=manual
 unsigned char manual_int_idx = 0;  // current intersection being configured in S17 (0-7)
 unsigned char manual_dir     = 0;  // currently selected direction in S17
+unsigned int  manual_path_buf = 0; // packed 16-bit: 2 bits per intersection
 
 // ---- Internal ----
 static lcd_state_t prev_state = LCD_NUM_STATES; // force redraw on first call
 // s7_from_s11 removed — main.c now tracks resume state and handles S7 resume
-static bit s17_needs_redraw = 0; // set by LCD_FSM_s17_advance to trigger redraw
 
 // Joystick latches: must return to center before next trigger
 static bit joy_x_ready = 1;
@@ -117,28 +117,28 @@ static void redraw(void)
             break;
 
         case LCD_S17:
-            if (manual_int_idx >= 8) {
-                LCDprint("Man All Sent    ", 1, 0);
-                LCDprint("SW to Start     ", 2, 0);
-            } else {
-                i = 0;
-                s17_line1[i++] = 'M'; s17_line1[i++] = 'a'; s17_line1[i++] = 'n';
-                s17_line1[i++] = ' ';
-                s17_line1[i++] = 'I'; s17_line1[i++] = 'n'; s17_line1[i++] = 't'; s17_line1[i++] = ':';
-                n = manual_int_idx + 1;
-                if (n >= 10) s17_line1[i++] = (char)('0' + n / 10);
-                s17_line1[i++] = (char)('0' + n % 10);
-                while (i < 16) s17_line1[i++] = ' ';
-                s17_line1[16] = '\0';
-                LCDprint(s17_line1, 1, 0);
-                switch (manual_dir) {
-                    case 0: LCDprint(">Forward        ", 2, 0); break;
-                    case 1: LCDprint(">Left           ", 2, 0); break;
-                    case 2: LCDprint(">Right          ", 2, 0); break;
-                    case 3: LCDprint(">Stop           ", 2, 0); break;
-                    default: break;
-                }
+            i = 0;
+            s17_line1[i++] = 'M'; s17_line1[i++] = 'a'; s17_line1[i++] = 'n';
+            s17_line1[i++] = ' ';
+            s17_line1[i++] = 'I'; s17_line1[i++] = 'n'; s17_line1[i++] = 't'; s17_line1[i++] = ':';
+            n = manual_int_idx + 1;
+            if (n >= 10) s17_line1[i++] = (char)('0' + n / 10);
+            s17_line1[i++] = (char)('0' + n % 10);
+            while (i < 16) s17_line1[i++] = ' ';
+            s17_line1[16] = '\0';
+            LCDprint(s17_line1, 1, 0);
+            switch (manual_dir) {
+                case 0: LCDprint(">Forward        ", 2, 0); break;
+                case 1: LCDprint(">Left           ", 2, 0); break;
+                case 2: LCDprint(">Right          ", 2, 0); break;
+                case 3: LCDprint(">Stop           ", 2, 0); break;
+                default: break;
             }
+            break;
+
+        case LCD_S18:
+            LCDprint("Ready to IR TX  ", 1, 0);
+            LCDprint("Press PB_TX     ", 2, 0);
             break;
 
         default:
@@ -153,15 +153,6 @@ void LCD_FSM_pause(lcd_state_t from_state)
     lcd_state = LCD_S7;
 }
 
-// ---- Manual intersection advance (called from main.c after sending IR) ----
-void LCD_FSM_s17_advance(void)
-{
-    if (manual_int_idx < 8)
-        manual_int_idx++;
-    manual_dir = 0;
-    s17_needs_redraw = 1;
-}
-
 // ---- Init ----
 void LCD_FSM_init(void)
 {
@@ -173,6 +164,7 @@ void LCD_FSM_init(void)
     active_path    = 0;
     manual_int_idx = 0;
     manual_dir     = 0;
+    manual_path_buf = 0;
     joy_x_ready    = 1;
     joy_y_ready    = 1;
     pb0_ready      = 1;
@@ -238,6 +230,7 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
                     active_path = selected_path;
                     manual_int_idx = 0;
                     manual_dir = 0;
+                    manual_path_buf = 0;
                     lcd_state = LCD_S17;
                 } else {
                     lcd_state = LCD_S3;
@@ -283,10 +276,22 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
             break;
 
         case LCD_S17:
-            if (manual_int_idx < 8) {
-                if (joy_right) { manual_dir = (manual_dir < 3) ? manual_dir + 1 : 0; need_redraw = 1; }
-                if (joy_left)  { manual_dir = (manual_dir > 0) ? manual_dir - 1 : 3; need_redraw = 1; }
+            if (joy_right) { manual_dir = (manual_dir < 3) ? manual_dir + 1 : 0; need_redraw = 1; }
+            if (joy_left)  { manual_dir = (manual_dir > 0) ? manual_dir - 1 : 3; need_redraw = 1; }
+            if (pb0_pressed) {
+                /* Save current direction into packed buffer */
+                manual_path_buf |= ((unsigned int)manual_dir << (manual_int_idx * 2));
+                manual_int_idx++;
+                if (manual_int_idx >= 8) {
+                    lcd_state = LCD_S18;
+                } else {
+                    manual_dir = 0;
+                    need_redraw = 1;
+                }
             }
+            break;
+
+        case LCD_S18:
             break;
 
         default:
@@ -297,10 +302,8 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
     if (lcd_state != prev_state) {
         redraw();
         prev_state = lcd_state;
-        s17_needs_redraw = 0;
-    } else if (need_redraw || s17_needs_redraw) {
+    } else if (need_redraw) {
         redraw();
-        s17_needs_redraw = 0;
     }
 
 }

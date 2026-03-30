@@ -171,8 +171,8 @@ static bit pbtxcmd_s14_latch = 1;
 static bit pbstart_s14_latch = 1;
 static bit pbtxcmd_s15_latch = 1;
 static bit pbstart_s15_latch = 1;
-static bit pbsw_s17_latch    = 1;
-static bit pbtxcmd_s17_latch = 1;
+static bit pbtxcmd_s18_latch = 1;
+static bit pbstart_s18_latch = 1;
 static bit pb0_s7_latch      = 1;
 static bit pb0_s8_latch      = 1;
 static lcd_state_t s7_resume_state = LCD_S0; // which running state S7 should resume to
@@ -271,19 +271,13 @@ static void handle_s13_buttons(void)
     /* PB_START: send start command and go to S5 */
     if (PB_START == 0) {
         if (pbstart_s13_latch && fsm_state == FSM_IDLE) {
-            if (active_path == 3) {
-                manual_int_idx = 0;
-                manual_dir     = 0;
-                lcd_state = LCD_S17;
-            } else {
-                send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
-                while (fsm_state == FSM_IDLE);
-                while (fsm_state != FSM_IDLE);
-                IR_TX_debug_print(IR_CMD_START, 0x0000);
-                intersection_num = 0;
-                crossing_updated = 0;
-                lcd_state = LCD_S5;
-            }
+            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
+            IR_TX_debug_print(IR_CMD_START, 0x0000);
+            intersection_num = 0;
+            crossing_updated = 0;
+            lcd_state = LCD_S5;
             pbstart_s13_latch = 0;
         }
     } else {
@@ -361,40 +355,43 @@ static void handle_s15_buttons(void)
     }
 }
 
-static void handle_s17_buttons(void)
+static void handle_s18_buttons(void)
 {
-    if (lcd_state != LCD_S17) { pbsw_s17_latch = 1; pbtxcmd_s17_latch = 1; return; }
+    if (lcd_state != LCD_S18) { pbtxcmd_s18_latch = 1; pbstart_s18_latch = 1; return; }
 
-    /* PB_TXCMD: send current intersection decision and advance */
+    /* PB_TXCMD: send MODE(0=auto) + manul_path packed 16-bit */
     if (PB_TXCMD == 0) {
-        if (pbtxcmd_s17_latch && fsm_state == FSM_IDLE && manual_int_idx < 8) {
-            send_ir_packet(
-                (uint8_t)IR_CMD_CROSSING_DECISION,
-                (uint16_t)(((uint16_t)manual_int_idx << 8) | (uint16_t)manual_dir),
-                IR_ADDR
-            );
-            IR_TX_debug_print(IR_CMD_CROSSING_DECISION, (uint16_t)(((uint16_t)manual_int_idx << 8) | (uint16_t)manual_dir));
+        if (pbtxcmd_s18_latch && fsm_state == FSM_IDLE) {
+            send_ir_packet(IR_CMD_MODE, 0x0000, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_MODE, 0x0000);
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
-            LCD_FSM_s17_advance(); // increments manual_int_idx, resets manual_dir, triggers redraw
-            pbtxcmd_s17_latch = 0;
+            send_ir_packet(IR_CMD_PATH, 0x0004, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_PATH, 0x0004);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
+            send_ir_packet(IR_CMD_MANUL_PATH, manual_path_buf, IR_ADDR);
+            IR_TX_debug_print(IR_CMD_MANUL_PATH, manual_path_buf);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
+            pbtxcmd_s18_latch = 0;
         }
     } else {
-        pbtxcmd_s17_latch = 1;
+        pbtxcmd_s18_latch = 1;
     }
 
-    /* JoyStick_SW: all done, send START and begin running */
-    if (JoyStick_SW == 0) {
-        if (pbsw_s17_latch && fsm_state == FSM_IDLE) {
+    /* PB_START: send start command and go to S5 */
+    if (PB_START == 0) {
+        if (pbstart_s18_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
-            IR_TX_debug_print(IR_CMD_START, 0x0000);
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
+            IR_TX_debug_print(IR_CMD_START, 0x0000);
             lcd_state = LCD_S5;
-            pbsw_s17_latch = 0;
+            pbstart_s18_latch = 0;
         }
     } else {
-        pbsw_s17_latch = 1;
+        pbstart_s18_latch = 1;
     }
 }
 
@@ -507,7 +504,7 @@ void main (){
 		handle_s13_buttons();
 		handle_s14_buttons();
 		handle_s15_buttons();
-		handle_s17_buttons();
+		handle_s18_buttons();
 
 		// Update intersection display in auto mode
 		if (lcd_state == LCD_S5 && crossing_updated) {
@@ -522,12 +519,11 @@ void main (){
 			IR_RX_debug_print(&dbg_frame);
 		}
         */
-		// Debug: print imu_regs[] to UART0 whenever any register changes
+		// Debug: print individual imu_reg when it changes
 		{
 			static unsigned int xdata imu_prev[IMU_REG_COUNT];
 			static bit imu_prev_init = 0;
 			unsigned char ri;
-			bit imu_changed = 0;
 
 			if (!imu_prev_init) {
 				for (ri = 0; ri < IMU_REG_COUNT; ri++)
@@ -537,20 +533,39 @@ void main (){
 
 			for (ri = 0; ri < IMU_REG_COUNT; ri++) {
 				if (imu_regs[ri] != imu_prev[ri]) {
-					imu_changed = 1;
-					break;
-				}
-			}
-
-			if (imu_changed) {
-				UART0_send_string("IMU:");
-				for (ri = 0; ri < IMU_REG_COUNT; ri++) {
-					UART0_send_char(' ');
+					UART0_send_string("IMU[");
+					uart0_send_hex_byte(ri);
+					UART0_send_string("]=");
 					uart0_send_hex_byte((unsigned char)(imu_regs[ri] >> 8));
 					uart0_send_hex_byte((unsigned char)(imu_regs[ri] & 0xFFu));
+					UART0_send_string("\r\n");
 					imu_prev[ri] = imu_regs[ri];
 				}
+			}
+		}
+
+		// Debug: print left/right power whenever they change
+		{
+			static signed char prev_lp = 0;
+			static signed char prev_rp = 0;
+			if (left_power != prev_lp || right_power != prev_rp) {
+				UART0_send_string("PWR: L=");
+				if (left_power < 0) {
+					UART0_send_char('-');
+					uart0_send_hex_byte((unsigned char)(-(left_power)));
+				} else {
+					uart0_send_hex_byte((unsigned char)left_power);
+				}
+				UART0_send_string(" R=");
+				if (right_power < 0) {
+					UART0_send_char('-');
+					uart0_send_hex_byte((unsigned char)(-(right_power)));
+				} else {
+					uart0_send_hex_byte((unsigned char)right_power);
+				}
 				UART0_send_string("\r\n");
+				prev_lp = left_power;
+				prev_rp = right_power;
 			}
 		}
 
