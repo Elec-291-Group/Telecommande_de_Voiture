@@ -11,7 +11,8 @@ from PyQt5.QtCore import Qt, QTimer, QRectF
 from PyQt5.QtGui import QColor, QPainter, QPen, QBrush, QLinearGradient, QFont
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QPushButton, QComboBox, QTextEdit, QFileDialog, QMessageBox,
+    QLabel, QPushButton, QComboBox, QTextEdit, QPlainTextEdit,
+    QFileDialog, QMessageBox,
     QGroupBox, QCheckBox, QSlider, QDoubleSpinBox, QTabWidget,
     QSizePolicy
 )
@@ -664,12 +665,15 @@ class ImuGui(QWidget):
         self.latest_raw = None
 
         self.init_ui()
+        self.data_log_timer = QTimer()
+        self.data_log_timer.timeout.connect(self._append_data_log)
+        self.data_log_timer.start(1000)
         self.pathfinder_tab.set_shared_serial_host(self)
         self.refresh_ports()
         self.update_alpha_label()
         self.update_plot_visibility()
         self.update_orientation_curve_visibility()
-        QTimer.singleShot(0, self.auto_connect_serial)
+
 
 
     def init_ui(self):
@@ -687,10 +691,17 @@ class ImuGui(QWidget):
         self.tabs.addTab(self.imu_tab, "  IMU  ")
         self.tabs.addTab(self.pathfinder_tab, "  Pathfinder  ")
 
+        tab_outer = QHBoxLayout()
+        tab_outer.setContentsMargins(8, 8, 8, 8)
+        tab_outer.setSpacing(10)
+        self.imu_tab.setLayout(tab_outer)
+
+        left_widget = QWidget()
         tab_layout = QVBoxLayout()
-        tab_layout.setContentsMargins(8, 8, 8, 8)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
         tab_layout.setSpacing(10)
-        self.imu_tab.setLayout(tab_layout)
+        left_widget.setLayout(tab_layout)
+        tab_outer.addWidget(left_widget, stretch=3)
 
         self.robot_visual = RobotVisualizationWidget()
         tab_layout.addWidget(self.robot_visual)
@@ -789,6 +800,19 @@ class ImuGui(QWidget):
 
         self.console.setReadOnly(True)
         tab_layout.addWidget(self.console)
+
+        # ── Right-side data log panel ──
+        log_group = QGroupBox("Data Log")
+        log_vlayout = QVBoxLayout()
+        log_vlayout.setContentsMargins(8, 8, 8, 8)
+        self.data_log = QPlainTextEdit()
+        self.data_log.setReadOnly(True)
+        self.data_log.setMaximumBlockCount(300)
+        self.data_log.setMinimumWidth(260)
+        self.data_log.setPlaceholderText("Waiting for data…")
+        log_vlayout.addWidget(self.data_log)
+        log_group.setLayout(log_vlayout)
+        tab_outer.addWidget(log_group, stretch=1)
 
         self.refresh_btn.clicked.connect(self.refresh_ports)
         self.connect_btn.clicked.connect(self.connect_serial)
@@ -1343,6 +1367,25 @@ class ImuGui(QWidget):
 
     def emergency_stop(self):
         self.send_serial_command("STOP\n")
+
+    def _append_data_log(self):
+        if self.latest_raw is None or self.stream_btn.text() == "Stream ON":
+            return
+        ts = datetime.now().strftime("%H:%M:%S")
+        ax = self.latest_raw.get("ax", 0.0)
+        ay = self.latest_raw.get("ay", 0.0)
+        az = self.latest_raw.get("az", 0.0)
+        gx = self.latest_raw.get("gx", 0.0)
+        gy = self.latest_raw.get("gy", 0.0)
+        gz = self.latest_raw.get("gz", 0.0)
+        entry = (
+            f"[{ts}]\n"
+            f"  Roll:{self.filtered_roll:+7.2f}°  Pitch:{self.filtered_pitch:+7.2f}°\n"
+            f"  Ax:{ax:+.3f}  Ay:{ay:+.3f}  Az:{az:+.3f} g\n"
+            f"  Gx:{gx:+.2f}  Gy:{gy:+.2f}  Gz:{gz:+.2f} dps\n"
+            f"  L-Pwr:{self.left_power:+d}  R-Pwr:{self.right_power:+d}"
+        )
+        self.data_log.appendPlainText(entry)
 
     def closeEvent(self, event):
         try:

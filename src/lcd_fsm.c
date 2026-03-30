@@ -284,13 +284,8 @@ void LCD_FSM_update(unsigned char x_byte, unsigned char y_byte)
 
         case LCD_S17:
             if (manual_int_idx < 8) {
-                if (manual_int_idx == 7) {
-                    /* 8th intersection is forced Stop — lock direction */
-                    if (manual_dir != 3) { manual_dir = 3; need_redraw = 1; }
-                } else {
-                    if (joy_right) { manual_dir = (manual_dir < 3) ? manual_dir + 1 : 0; need_redraw = 1; }
-                    if (joy_left)  { manual_dir = (manual_dir > 0) ? manual_dir - 1 : 3; need_redraw = 1; }
-                }
+                if (joy_right) { manual_dir = (manual_dir < 3) ? manual_dir + 1 : 0; need_redraw = 1; }
+                if (joy_left)  { manual_dir = (manual_dir > 0) ? manual_dir - 1 : 3; need_redraw = 1; }
             }
             break;
 
