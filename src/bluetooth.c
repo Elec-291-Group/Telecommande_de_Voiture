@@ -5,6 +5,7 @@
 #include "ir_rx.h"
 #include "lcd_fsm.h"
 #include "data_buffers.h"
+#include "timer.h"
 
 // ---- Internal state ----
 static bit bluetooth_stream_enabled = 0;
@@ -160,6 +161,41 @@ static void Bluetooth_handle_path_command(const char *cmd_text)
 			UART1_send_string("PATH_ACK,ERROR\r\n");
 		}
 	}
+}
+
+/* Send left+right power over BLE every 100 ms for the given duration. */
+#define DBG_STEP_MS 100u
+static void debug_send_power(signed char lp, signed char rp, unsigned int duration_ms)
+{
+    unsigned int elapsed;
+    left_power  = lp;
+    right_power = rp;
+    for (elapsed = 0; elapsed < duration_ms; elapsed += DBG_STEP_MS) {
+        Bluetooth_stream_power(0, lp);
+        Bluetooth_stream_power(1, rp);
+        waitms(DBG_STEP_MS);
+    }
+}
+
+/*
+ * Bluetooth_debug_drive_sequence
+ * Simulates over BLE:
+ *   1. Straight forward at 80% for 2 s
+ *   2. Spin left  90° at 60% (~521 ms)
+ *   3. Spin right 90° at 60% (~521 ms)
+ *   4. Stop
+ *
+ * Timing derivation (Solarbotics GM4, wheelbase=10.6 cm, r=3.3 cm):
+ *   max_speed = 77 RPM * 2π * 3.3 / 60 ≈ 26.6 cm/s
+ *   ω at 60%  = 2 * (0.6 * 26.6) / 10.6 ≈ 3.01 rad/s
+ *   t_90°     = (π/2) / 3.01 ≈ 521 ms
+ */
+void Bluetooth_debug_drive_sequence(void)
+{
+    debug_send_power( 80,  80, 2000u); /* straight forward */
+    debug_send_power(-60,  60,  521u); /* spin left  90°   */
+    debug_send_power( 60, -60,  521u); /* spin right 90°   */
+    debug_send_power(  0,   0,  200u); /* stop             */
 }
 
 void Bluetooth_handle_commands(void)

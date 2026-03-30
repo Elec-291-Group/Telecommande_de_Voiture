@@ -307,6 +307,38 @@ QFrame#separator {
 """
 
 
+# ── Solarbotics GM4 physical constants ──────────────────────────────────────
+_WHEELBASE_CM    = 10.6
+_WHEEL_RADIUS_CM = 3.3
+_MAX_RPM         = 77.0
+_MAX_SPEED_CM_S  = _MAX_RPM * 2 * math.pi * _WHEEL_RADIUS_CM / 60.0  # ≈ 26.6 cm/s
+
+
+def compute_motion_state(left: float, right: float, threshold: float = 5.0) -> dict:
+    v_left  = (left  / 100.0) * _MAX_SPEED_CM_S
+    v_right = (right / 100.0) * _MAX_SPEED_CM_S
+    linear_vel  = (v_left + v_right) / 2.0
+    angular_vel = (v_left - v_right) / _WHEELBASE_CM
+    speed_pct   = abs(left + right) / 2.0
+    diff        = left - right
+    stopped     = abs(left) < threshold and abs(right) < threshold
+    turn_angle  = math.degrees(math.atan2(diff, abs(left + right) + 1e-6))
+    if stopped:
+        direction = 'stopped'
+    elif abs(diff) < threshold:
+        direction = 'forward' if linear_vel > 0 else 'reverse'
+    elif speed_pct < threshold:
+        direction = 'spin_right' if diff > 0 else 'spin_left'
+    else:
+        direction = 'turn_right' if diff > 0 else 'turn_left'
+    return {
+        'direction':        direction,
+        'linear_vel_cms':   round(linear_vel, 2),
+        'angular_vel_rads': round(angular_vel, 4),
+        'turn_angle_deg':   round(turn_angle, 1),
+    }
+
+
 def compute_roll_pitch(ax, ay, az):
     try:
         roll = math.degrees(math.atan2(ay, az))
@@ -327,16 +359,18 @@ class RobotVisualizationWidget(QWidget):
         self.gyro = (0.0, 0.0, 0.0)
         self.connected = False
         self.moving = False
-        self.sample_rate_hz = 0.0
+        self.left_power = 0
+        self.right_power = 0
 
-    def set_vehicle_state(self, roll_deg, pitch_deg, accel, gyro, connected, moving, sample_rate_hz):
+    def set_vehicle_state(self, roll_deg, pitch_deg, accel, gyro, connected, moving, left_power, right_power):
         self.roll_deg = roll_deg
         self.pitch_deg = pitch_deg
         self.accel = accel
         self.gyro = gyro
         self.connected = connected
         self.moving = moving
-        self.sample_rate_hz = sample_rate_hz
+        self.left_power = left_power
+        self.right_power = right_power
         self.update()
 
     def paintEvent(self, event):
@@ -473,18 +507,41 @@ class RobotVisualizationWidget(QWidget):
         painter.setPen(motion_color)
         painter.drawText(QRectF(36 + status_w + 10, badge_y, motion_w, badge_h), Qt.AlignCenter, motion)
 
+        # Direction badge
+        motion = compute_motion_state(self.left_power, self.right_power)
+        dir_label = motion['direction'].replace('_', ' ').upper()
+        dir_color_map = {
+            'FORWARD':    QColor(22, 163, 74),
+            'REVERSE':    QColor(220, 38, 38),
+            'TURN RIGHT': QColor(234, 88, 12),
+            'TURN LEFT':  QColor(234, 88, 12),
+            'SPIN RIGHT': QColor(168, 85, 247),
+            'SPIN LEFT':  QColor(168, 85, 247),
+            'STOPPED':    QColor(100, 116, 139),
+        }
+        dir_color = dir_color_map.get(dir_label, QColor(100, 116, 139))
+        dir_bg = QColor(dir_color.red(), dir_color.green(), dir_color.blue(), 28)
+        dir_w = max(110, len(dir_label) * 10 + 24)
+        dir_x = 36 + status_w + 10 + motion_w + 10
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(dir_bg)
+        painter.drawRoundedRect(QRectF(dir_x, badge_y, dir_w, badge_h), badge_radius, badge_radius)
+        painter.setPen(dir_color)
+        painter.drawText(QRectF(dir_x, badge_y, dir_w, badge_h), Qt.AlignCenter, dir_label)
+
         # Metric cards
         card_y = h - 142
         card_h = 92
-        card_w = (w - 80) / 3.0
+        card_w = (w - 92) / 4.0
         metrics = [
-            ("Roll", self.roll_deg, "deg", QColor(124, 58, 237)),
-            ("Pitch", self.pitch_deg, "deg", QColor(37, 99, 235)),
-            ("Rate", self.sample_rate_hz, "Hz", QColor(5, 150, 105)),
+            ("Roll",  self.roll_deg,                 "deg",  QColor(124, 58, 237)),
+            ("Pitch", self.pitch_deg,                "deg",  QColor(37, 99, 235)),
+            ("Speed", motion['linear_vel_cms'],      "cm/s", QColor(5, 150, 105)),
+            ("Angle", motion['turn_angle_deg'],      "deg",  QColor(220, 38, 38)),
         ]
 
         for index, (label, value, unit, accent) in enumerate(metrics):
-            left = 28 + index * (card_w + 12)
+            left = 20 + index * (card_w + 10)
             rect = QRectF(left, card_y, card_w, card_h)
 
             # Card background — white with subtle shadow effect
@@ -859,7 +916,8 @@ class ImuGui(QWidget):
             ),
             connected,
             self.motion_indicator.text() == "Moving",
-            0.0,
+            self.left_power,
+            self.right_power,
         )
         self.pathfinder_tab.handle_serial_status("Connected" if connected else "Disconnected")
         self.pathfinder_tab.sync_shared_serial_controls()
@@ -1150,7 +1208,8 @@ class ImuGui(QWidget):
             (gx, gy, gz),
             self.connection_indicator.text() == "Connected",
             self.motion_indicator.text() == "Moving",
-            sample_rate,
+            self.left_power,
+            self.right_power,
         )
         self.update_plots()
 

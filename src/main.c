@@ -89,6 +89,8 @@ void IR_debug(void)
 {
     IR_Frame_t f;
     send_ir_packet((uint8_t)IR_CMD_START, (uint16_t)0x0000, (uint8_t)IR_ADDR1);
+    while (fsm_state == FSM_IDLE);
+    while (fsm_state != FSM_IDLE);
     IR_TX_debug_print(IR_CMD_START, 0x0000);
     while (IR_RX_get(&f)) {
         if (f.addr == IR_ADDR2) {
@@ -180,6 +182,8 @@ static void handle_pb_start(void)
     if (PB_START == 0) {
         if (pb_start_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_START, 0x0000);
             pb_start_latch = 0;
         }
@@ -193,6 +197,8 @@ static void handle_pb_pause(void)
     if (PB_PAUSE == 0) {
         if (pb_pause_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_PAUSE, 0x0000, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_PAUSE, 0x0000);
             if (lcd_state == LCD_S5  || lcd_state == LCD_S6 ||
                 lcd_state == LCD_S9  || lcd_state == LCD_S11) {
@@ -211,6 +217,8 @@ static void handle_pb_reset(void)
     if (PB_RESET == 0) {
         if (pb_reset_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_RESET, 0x0000, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_RESET, 0x0000);
             lcd_state = LCD_S0;
             pb_reset_latch = 0;
@@ -269,6 +277,8 @@ static void handle_s13_buttons(void)
                 lcd_state = LCD_S17;
             } else {
                 send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+                while (fsm_state == FSM_IDLE);
+                while (fsm_state != FSM_IDLE);
                 IR_TX_debug_print(IR_CMD_START, 0x0000);
                 intersection_num = 0;
                 crossing_updated = 0;
@@ -302,6 +312,8 @@ static void handle_s14_buttons(void)
     if (PB_START == 0) {
         if (pbstart_s14_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_START, 0x0000);
             lcd_state = LCD_S6;
             pbstart_s14_latch = 0;
@@ -325,6 +337,8 @@ static void handle_s15_buttons(void)
             send_path_waypoints();
             while (fsm_state != FSM_IDLE);
             send_ir_packet(IR_CMD_ZERO_YAW, 0x0012, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_ZERO_YAW, 0x0012);
             pbtxcmd_s15_latch = 0;
         }
@@ -336,6 +350,8 @@ static void handle_s15_buttons(void)
     if (PB_START == 0) {
         if (pbstart_s15_latch && fsm_state == FSM_IDLE) {
             send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+            while (fsm_state == FSM_IDLE);
+            while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_START, 0x0000);
             lcd_state = LCD_S11;
             pbstart_s15_latch = 0;
@@ -352,6 +368,7 @@ static void handle_s17_buttons(void)
     /* PB_TXCMD: send current intersection decision and advance */
     if (PB_TXCMD == 0) {
         if (pbtxcmd_s17_latch && fsm_state == FSM_IDLE && manual_int_idx < 8) {
+            if (manual_int_idx == 7) manual_dir = 3; /* force Stop on 8th */
             send_ir_packet(
                 (uint8_t)IR_CMD_CROSSING_DECISION,
                 (uint16_t)(((uint16_t)manual_int_idx << 8) | (uint16_t)manual_dir),
@@ -360,7 +377,18 @@ static void handle_s17_buttons(void)
             IR_TX_debug_print(IR_CMD_CROSSING_DECISION, (uint16_t)(((uint16_t)manual_int_idx << 8) | (uint16_t)manual_dir));
             while (fsm_state == FSM_IDLE);
             while (fsm_state != FSM_IDLE);
-            LCD_FSM_s17_advance(); // increments manual_int_idx, resets manual_dir, triggers redraw
+            if (manual_dir == 3) {
+                /* Stop chosen — done programming, send START and run */
+                send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
+                while (fsm_state == FSM_IDLE);
+                while (fsm_state != FSM_IDLE);
+                IR_TX_debug_print(IR_CMD_START, 0x0000);
+                intersection_num = 0;
+                crossing_updated = 0;
+                lcd_state = LCD_S5;
+            } else {
+                LCD_FSM_s17_advance(); // increments manual_int_idx, resets manual_dir, triggers redraw
+            }
             pbtxcmd_s17_latch = 0;
         }
     } else {
@@ -469,9 +497,12 @@ void main (){
 
 	UART0_send_string("start\r\n");
 	while(1){
+        // poBluetooth_debug_drive_sequencewer debug 
+       // Bluetooth_debug_drive_sequence();
+
+        
 		Bluetooth_handle_commands();
 		Bluetooth_forward_imu();
-
 		joystick_x = Volts_at_Pin(JOYSTICK_X);
 		joystick_y = Volts_at_Pin(JOYSTICK_Y);
 
