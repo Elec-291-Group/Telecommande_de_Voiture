@@ -8,10 +8,10 @@ Built on the **STM32L051K8T6** (ARM Cortex-M0+, 32 MHz) with bare-metal C and a 
 
 ```
   Laptop (GUI)                Remote Controller              Robot Car (this repo)
- ┌────────────┐   BLE/UART   ┌──────────────────┐   IR TX/RX  ┌─────────────────┐
- │ PyQt5 App  │◄────────────►│ EFM8LB1 MCU      │◄───────────►│ STM32L051K8T6   │
- │  - 3D viz  │  JDY-23 BLE  │  - LCD + Joystick│  38 kHz     │  - H-Bridge     │
- │  - Path    │  9600 baud   │  - Mode select   │  28-bit     │  - 3x Inductors │
+ ┌────────────┐   BLE/UART   ┌────────────────── ┐   IR TX/RX  ┌─────────────────┐
+ │ PyQt5 App  │◄────────────►│ EFM8LB1 MCU       │◄───────────►│ STM32L051K8T6   │
+ │  - 3D viz  │  JDY-23 BLE  │  - LCD + Joystick │  38 kHz     │  - H-Bridge     │
+ │  - Path    │  9600 baud   │  - Mode select    │  28-bit     │  - 3x Inductors │
  │    editor  │              │  - IR transceiver │  SIRC       │  - LSM6DS33 IMU │
  │  - Gauges  │              │                   │  protocol   │  - VL53L0X ToF  │
  └────────────┘              └───────────────────┘             └─────────────────┘
