@@ -8,13 +8,13 @@ Built for the **EFM8LB1** microcontroller (Silicon Labs 8051, 72 MHz) with **SDC
 
 ```
   Laptop (GUI)                Remote Controller (this repo)    Robot Car
- ┌────────────┐   BLE/UART   ┌──────────────────────┐  IR TX/RX  ┌──────────┐
- │ PyQt5 App  │◄────────────►│ EFM8LB1 @ 72 MHz     │◄──────────►│ STM32    │
- │  - Path    │  JDY-23 BLE  │  - 16x2 LCD (4-bit)  │  38 kHz    │  - Motors│
- │    editor  │  9600 baud   │  - Joystick (2-axis)  │  28-bit    │  - IMU   │
- │  - IMU viz │              │  - 4 push buttons     │  SIRC      │  - Mag   │
- │  - Console │              │  - IR LED + TSOP33x   │  protocol  │    sensor│
- └────────────┘              └──────────────────────┘             └──────────┘
+ ┌────────────┐   BLE/UART   ┌──────────────────────-┐  IR TX/RX  ┌──────────┐
+ │ PyQt5 App  │◄────────────►│ EFM8LB1 @ 72 MHz      │◄──────────►│ STM32    │
+ │  - Path    │  JDY-23 BLE  │  - 16x2 LCD (4-bit)   │  38 kHz    │ - Motors │
+ │    editor  │  9600 baud   │  - Joystick (2-axis)  │  28-bit    │ - IMU    │
+ │  - IMU viz │              │  - 4 push buttons     │  SIRC      │ - Mag    │
+ │  - Console │              │  - IR LED + TSOP33x   │  protocol  │  sensor  │
+ └────────────┘              └──────────────────────-┘            └──────────┘
 ```
 
 ## Features
