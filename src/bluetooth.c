@@ -262,15 +262,7 @@ void Bluetooth_forward_imu(void)
     unsigned char ri;
     IR_Frame_t    periodic_frame;
 
-    /* Drain incoming IR frames */
-    while (IR_RX_get(&bluetooth_rx_frame))
-    {
-        if (bluetooth_rx_frame.addr != IR_ADDR2)
-            continue;
-
-        IR_RX_decode_command(&bluetooth_rx_frame);
-        IMUBuffer_push_frame(&bluetooth_rx_frame);
-    }
+    /* RX frames are now drained by saw_step() in main.c */
 
     /* Count Timer3 overflows for a non-blocking 500 ms tick */
     t3_now = IR_RX_read_t3();

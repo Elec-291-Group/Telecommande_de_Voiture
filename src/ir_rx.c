@@ -3,8 +3,13 @@
  *
  * Timer 3 runs free at SYSCLK/12 = 6 MHz → 1 tick ≈ 0.167 µs
  *
- * T = 263 µs  →  1578 ticks
- * 3.5T threshold = 921 µs  →  5526 ticks   (separates 0 / 1 / start)
+ * T = 184 µs  →  1104 ticks   (7 carrier cycles at 38 kHz)
+ *
+ * Thresholds (all in Timer 3 ticks at 6 MHz):
+ *   Leader burst min   1.5T = 276 µs  →  1656 ticks  (separates 2T leader from 1T data)
+ *   F2F bit threshold  3.5T = 644 µs  →  3864 ticks  (below = 0, at/above = 1)
+ *   F2F minimum error  2.0T = 368 µs  →  2208 ticks  (shorter = glitch → reset)
+ *   F2F maximum error  5.0T = 920 µs  →  5520 ticks  (longer  = timeout → reset)
  *
  * Signal is ACTIVE-LOW (TSOP demodulator output):
  *   LOW  = carrier burst   (active)
@@ -14,7 +19,7 @@
  *   [27:20] 8-bit command label    [19:4] 16-bit IMU register data    [3:0] 4-bit addr
  *
  * Edge strategy:
- *   Rising edge  → measure LOW-pulse duration; if ≥ 3.5T it's the start burst
+ *   Rising edge  → measure LOW-pulse duration; if ≥ 1.5T it's the 2T start burst
  *   Falling edge → measure falling-to-falling interval to decode bits
  *
  * NOTE: ISR must save/restore SFRPAGE and force 0x00 — Timer 3 and Port Match
@@ -27,7 +32,10 @@
 
 /* ---------- timing constants ---------------------------------------------- */
 #define TICKS_PER_US    6U                              /* SYSCLK/12 = 6 MHz   */
-#define THRESH_3_5T     ((unsigned int)(921U * TICKS_PER_US))   /* 5526 ticks  */
+#define THRESH_LEADER   ((unsigned int)(276U * TICKS_PER_US))   /* 1.5T = 1656 ticks */
+#define THRESH_3_5T     ((unsigned int)(644U * TICKS_PER_US))   /* 3.5T = 3864 ticks */
+#define THRESH_F2F_MIN  ((unsigned int)(368U * TICKS_PER_US))   /* 2.0T = 2208 ticks */
+#define THRESH_F2F_MAX  ((unsigned int)(920U * TICKS_PER_US))   /* 5.0T = 5520 ticks */
 
 /* ---------- P0.7 bit mask -------------------------------------------------- */
 #define IR_PIN_MASK     0x80U   /* P0.7 */
@@ -65,6 +73,11 @@ static unsigned int read_t3(void)
 unsigned int IR_RX_read_t3(void)
 {
     return read_t3();
+}
+
+unsigned char IR_RX_is_busy(void)
+{
+    return rx_state != RX_IDLE;
 }
 
 /* ---------- Port Match ISR (EFM8LB1 interrupt vector 8) ------------------- */
@@ -109,6 +122,14 @@ void PMATCH_ISR(void) __interrupt(8)
                 case RX_BITS:
                     interval  = now - last_fall;   /* falling-to-falling span     */
                     last_fall = now;
+
+                    /* Error bounds: glitch (<2T) or timeout (>5T) → reset */
+                    if (interval < THRESH_F2F_MIN || interval > THRESH_F2F_MAX)
+                    {
+                        rx_state = RX_IDLE;
+                        break;
+                    }
+
                     rx_frame <<= 1;
                     if (interval >= THRESH_3_5T)
                         rx_frame |= 1UL;           /* long interval → bit '1'     */
@@ -136,9 +157,9 @@ void PMATCH_ISR(void) __interrupt(8)
              * ================================================================ */
             interval = now - last_fall;   /* = duration of the LOW pulse          */
 
-            if (interval >= THRESH_3_5T)
+            if (interval >= THRESH_LEADER)
             {
-                /* Long burst (≥ 3.5T) → this is the 4T start pulse.
+                /* Burst ≥ 1.5T → this is the 2T start pulse.
                  * Accept from any state (re-syncs on noise or mid-frame errors). */
                 rx_state = RX_WAIT_FIRST_FALL;
             }

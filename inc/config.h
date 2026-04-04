@@ -25,6 +25,7 @@
 #define IR_CMD_PATH_WPT_BASE     7   // cmd 7+i: path_active[i], val = (x_cm_byte<<8)|y_cm_byte
 #define IR_CMD_ZERO_YAW          39  // val = 0x0012
 #define IR_CMD_MANUL_PATH        40  // val: 16-bit packed, 2 bits per intersection (int0=[1:0]..int7=[15:14])
+#define IR_CMD_NOP               41  // no-op heartbeat — keeps stop-and-wait exchange alive
 
 
 // IR RX Command bytes (STM32 TX -> EFM8 RX)
