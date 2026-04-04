@@ -45,4 +45,8 @@ unsigned char IR_RX_get(IR_Frame_t *out);
 /* Read the current Timer 3 value (6 MHz free-running, 1 tick ≈ 0.167 µs). */
 unsigned int IR_RX_read_t3(void);
 
+/* Returns 1 if the RX decoder FSM is mid-frame (not idle).
+ * Used by the stop-and-wait TX coordinator to avoid corrupting local RX. */
+unsigned char IR_RX_is_busy(void);
+
 #endif /* IR_RX_H */

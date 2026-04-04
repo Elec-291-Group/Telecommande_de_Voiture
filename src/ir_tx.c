@@ -1,9 +1,13 @@
 #include <EFM8LB1.h>
 #include "ir_tx.h"
+#include "ir_rx.h"
 #include "config.h"
 
 // FSM state
 volatile unsigned char fsm_state = FSM_IDLE;
+
+// Stop-and-wait deadlock counter — incremented every 184 µs while IDLE
+volatile unsigned int pp_idle_ticks = 0;
 
 // Trigger flag set by IR_Send(), cleared in ISR
 static volatile bit fsm_trigger = 0;
@@ -49,12 +53,11 @@ void send_ir_packet(uint8_t cmd, uint16_t val, uint8_t addr)
 	uint8_t i;
 
 	if (fsm_state != FSM_IDLE) return;   /* drop if previous frame still sending */
+	if (IR_RX_is_busy()) return;         /* don't TX while RX is mid-frame      */
 
 	sirc_unit_count = 0;
 
-	/* Start sign: 4T burst + 2T space --------------------------------- */
-	sirc_units[sirc_unit_count++] = 1;
-	sirc_units[sirc_unit_count++] = 1;
+	/* Start sign: 2T burst + 2T space --------------------------------- */
 	sirc_units[sirc_unit_count++] = 1;
 	sirc_units[sirc_unit_count++] = 1;
 	sirc_units[sirc_unit_count++] = 0;
@@ -106,7 +109,7 @@ void Timer0_ISR(void) __interrupt (1)
 	TR0 = 1;
 }
 
-// ---- Timer 2 — 263 µs envelope tick (10 × 38 kHz cycles) -----------
+// ---- Timer 2 — 184 µs envelope tick (7 × 38 kHz cycles) ------------
 
 void TIMER2_Init(void)
 {
@@ -123,10 +126,10 @@ void TIMER2_Init(void)
 	TR2 = 1;
 }
 
-// Called every 263 µs (one SIRC T unit).
+// Called every 184 µs (one SIRC T unit).
 // State machine:
-//   FSM_IDLE    — wait for fsm_trigger, then start frame
-//   FSM_SENDING — step through sirc_units[], pad silence to 171 units (45 ms)
+//   FSM_IDLE    — wait for fsm_trigger; count pp_idle_ticks for deadlock detection
+//   FSM_SENDING — step through sirc_units[], go IDLE after frame + short trail
 void Timer2_ISR(void) __interrupt (5)
 {
 	TR2  = 0;
@@ -135,13 +138,21 @@ void Timer2_ISR(void) __interrupt (5)
 
 	P2_2 = !P2_2;   // debug toggle
 
-	// Check for new frame trigger while idle
-	if (fsm_state == FSM_IDLE && fsm_trigger)
+	if (fsm_state == FSM_IDLE)
 	{
-		fsm_trigger      = 0;
-		sirc_unit_idx    = 0;
-		sirc_tick_count  = 0;
-		fsm_state        = FSM_SENDING;
+		if (fsm_trigger)
+		{
+			fsm_trigger      = 0;
+			sirc_unit_idx    = 0;
+			sirc_tick_count  = 0;
+			fsm_state        = FSM_SENDING;
+		}
+		else
+		{
+			// Count idle ticks for stop-and-wait deadlock detection
+			if (pp_idle_ticks < 0xFFFFU)
+				pp_idle_ticks++;
+		}
 	}
 
 	if (fsm_state == FSM_SENDING)
@@ -158,15 +169,16 @@ void Timer2_ISR(void) __interrupt (5)
 		}
 		else
 		{
-			// Frame payload exhausted — hold carrier off (inter-frame silence)
+			// Frame payload exhausted — hold carrier off
 			disable_carrier();
 		}
 
-		// Return to idle after the full 45 ms period (171 T units)
-		if (sirc_tick_count >= SIRC_PERIOD_UNITS)
+		// Go IDLE after frame content + short trailing silence (~1 ms)
+		if (sirc_tick_count >= sirc_unit_count + SIRC_TRAIL_UNITS)
 		{
 			disable_carrier();
-			fsm_state = FSM_IDLE;
+			fsm_state     = FSM_IDLE;
+			pp_idle_ticks = 0;   // reset deadlock timer on TX complete
 		}
 	}
 

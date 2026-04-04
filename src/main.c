@@ -17,6 +17,42 @@ static bit           crossing_updated = 0;
 signed char left_power  = 0;
 signed char right_power = 0;
 
+/* ---- Stop-and-wait TX command queue ------------------------------------ */
+typedef struct {
+    uint8_t  cmd;
+    uint16_t val;
+    uint8_t  addr;
+} TX_Cmd_t;
+
+#define TX_Q_SIZE  16
+#define TX_Q_MASK  (TX_Q_SIZE - 1)
+
+static TX_Cmd_t xdata tx_q[TX_Q_SIZE];
+static unsigned char tx_q_head = 0;
+static unsigned char tx_q_tail = 0;
+
+static void tx_q_push(uint8_t cmd, uint16_t val, uint8_t addr)
+{
+    unsigned char next = (tx_q_head + 1) & TX_Q_MASK;
+    if (next == tx_q_tail) return;   /* full — drop */
+    tx_q[tx_q_head].cmd  = cmd;
+    tx_q[tx_q_head].val  = val;
+    tx_q[tx_q_head].addr = addr;
+    tx_q_head = next;
+}
+
+static unsigned char tx_q_pop(TX_Cmd_t *out)
+{
+    unsigned char t;
+    if (tx_q_head == tx_q_tail) return 0;
+    t = tx_q_tail;
+    out->cmd  = tx_q[t].cmd;
+    out->val  = tx_q[t].val;
+    out->addr = tx_q[t].addr;
+    tx_q_tail = (t + 1) & TX_Q_MASK;
+    return 1;
+}
+
 void InitPinADC (unsigned char portno, unsigned char pinno)
 {
 	unsigned char mask;
@@ -178,10 +214,8 @@ static lcd_state_t s7_resume_state = LCD_S0; // which running state S7 should re
 static void handle_pb_start(void)
 {
     if (PB_START == 0) {
-        if (pb_start_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
+        if (pb_start_latch) {
+            tx_q_push(IR_CMD_START, 0x0000, IR_ADDR);
             IR_TX_debug_print(IR_CMD_START, 0x0000);
             UART1_send_string("btn,start\r\n");
             pb_start_latch = 0;
@@ -194,10 +228,8 @@ static void handle_pb_start(void)
 static void handle_pb_pause(void)
 {
     if (PB_PAUSE == 0) {
-        if (pb_pause_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_PAUSE, 0x0000, IR_ADDR);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
+        if (pb_pause_latch) {
+            tx_q_push(IR_CMD_PAUSE, 0x0000, IR_ADDR);
             IR_TX_debug_print(IR_CMD_PAUSE, 0x0000);
             UART1_send_string("btn,pause\r\n");
             if (lcd_state == LCD_S5  || lcd_state == LCD_S6 ||
@@ -215,10 +247,8 @@ static void handle_pb_pause(void)
 static void handle_pb_reset(void)
 {
     if (PB_RESET == 0) {
-        if (pb_reset_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_RESET, 0x0000, IR_ADDR);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
+        if (pb_reset_latch) {
+            tx_q_push(IR_CMD_RESET, 0x0000, IR_ADDR);
             IR_TX_debug_print(IR_CMD_RESET, 0x0000);
             UART1_send_string("btn,reset\r\n");
             lcd_state = LCD_S0;
@@ -229,7 +259,7 @@ static void handle_pb_reset(void)
     }
 }
 
-static void send_path_waypoints(void)
+static void queue_path_waypoints(void)
 {
     unsigned char count = PathBuffer_get_count();
     unsigned char i;
@@ -238,13 +268,11 @@ static void send_path_waypoints(void)
     for (i = 0; i < count; i++) {
         if (!PathBuffer_get(i, &wpt))
             continue;
-        send_ir_packet(
+        tx_q_push(
             (uint8_t)(IR_CMD_PATH_WPT_BASE + i),
             (uint16_t)(((uint16_t)(wpt.x_cm & 0xFF) << 8) | (uint16_t)(wpt.y_cm & 0xFF)),
             IR_ADDR
         );
-        while (fsm_state == FSM_IDLE);
-        while (fsm_state != FSM_IDLE);
     }
 }
 
@@ -252,29 +280,23 @@ static void handle_s13_buttons(void)
 {
     if (lcd_state != LCD_S13) { pbtxcmd_s13_latch = 1; pbstart_s13_latch = 1; return; }
 
-    /* PB_TXCMD: send MODE + PATH to car */
+    /* PB_TXCMD: queue MODE + PATH to car */
     if (PB_TXCMD == 0) {
-        if (pbtxcmd_s13_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
+        if (pbtxcmd_s13_latch) {
+            tx_q_push(IR_CMD_MODE, active_mode, IR_ADDR);
+            tx_q_push(IR_CMD_PATH, active_path + 1, IR_ADDR);
             IR_TX_debug_print(IR_CMD_MODE, active_mode);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
-            send_ir_packet(IR_CMD_PATH, active_path + 1, IR_ADDR);
             IR_TX_debug_print(IR_CMD_PATH, active_path + 1);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
             pbtxcmd_s13_latch = 0;
         }
     } else {
         pbtxcmd_s13_latch = 1;
     }
 
-    /* PB_START: send start command and go to S5 */
+    /* PB_START: queue start command and go to S5 */
     if (PB_START == 0) {
-        if (pbstart_s13_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
+        if (pbstart_s13_latch) {
+            tx_q_push(IR_CMD_START, 0x0000, IR_ADDR);
             IR_TX_debug_print(IR_CMD_START, 0x0000);
             intersection_num = 0;
             crossing_updated = 0;
@@ -290,25 +312,21 @@ static void handle_s14_buttons(void)
 {
     if (lcd_state != LCD_S14) { pbtxcmd_s14_latch = 1; pbstart_s14_latch = 1; return; }
 
-    /* PB_TXCMD: send MODE to car */
+    /* PB_TXCMD: queue MODE to car */
     if (PB_TXCMD == 0) {
-        if (pbtxcmd_s14_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_MODE, active_mode, IR_ADDR);
+        if (pbtxcmd_s14_latch) {
+            tx_q_push(IR_CMD_MODE, active_mode, IR_ADDR);
             IR_TX_debug_print(IR_CMD_MODE, active_mode);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
             pbtxcmd_s14_latch = 0;
         }
     } else {
         pbtxcmd_s14_latch = 1;
     }
 
-    /* PB_START: send start command and go to S6 */
+    /* PB_START: queue start command and go to S6 */
     if (PB_START == 0) {
-        if (pbstart_s14_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
+        if (pbstart_s14_latch) {
+            tx_q_push(IR_CMD_START, 0x0000, IR_ADDR);
             IR_TX_debug_print(IR_CMD_START, 0x0000);
             lcd_state = LCD_S6;
             pbstart_s14_latch = 0;
@@ -322,18 +340,13 @@ static void handle_s15_buttons(void)
 {
     if (lcd_state != LCD_S15) { pbtxcmd_s15_latch = 1; pbstart_s15_latch = 1; return; }
 
-    /* PB_TXCMD: send MODE (pathfind) + all waypoints + zero_yaw via IR */
+    /* PB_TXCMD: queue MODE (pathfind) + all waypoints + zero_yaw */
     if (PB_TXCMD == 0) {
-        if (pbtxcmd_s15_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_MODE, 0x0002, IR_ADDR);
+        if (pbtxcmd_s15_latch) {
+            tx_q_push(IR_CMD_MODE, 0x0002, IR_ADDR);
+            queue_path_waypoints();
+            tx_q_push(IR_CMD_ZERO_YAW, 0x0012, IR_ADDR);
             IR_TX_debug_print(IR_CMD_MODE, 0x0002);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
-            send_path_waypoints();
-            while (fsm_state != FSM_IDLE);
-            send_ir_packet(IR_CMD_ZERO_YAW, 0x0012, IR_ADDR);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
             IR_TX_debug_print(IR_CMD_ZERO_YAW, 0x0012);
             pbtxcmd_s15_latch = 0;
         }
@@ -341,12 +354,10 @@ static void handle_s15_buttons(void)
         pbtxcmd_s15_latch = 1;
     }
 
-    /* PB_START: send start command and go to S11 */
+    /* PB_START: queue start command and go to S11 */
     if (PB_START == 0) {
-        if (pbstart_s15_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
+        if (pbstart_s15_latch) {
+            tx_q_push(IR_CMD_START, 0x0000, IR_ADDR);
             IR_TX_debug_print(IR_CMD_START, 0x0000);
             lcd_state = LCD_S11;
             pbstart_s15_latch = 0;
@@ -360,37 +371,26 @@ static void handle_s18_buttons(void)
 {
     if (lcd_state != LCD_S18) { pbtxcmd_s18_latch = 1; pbstart_s18_latch = 1; return; }
 
-    /* PB_TXCMD: send MODE(0=auto) + manul_path packed 16-bit */
+    /* PB_TXCMD: queue MODE(0=auto) + PATH + manul_path packed 16-bit */
     if (PB_TXCMD == 0) {
-        if (pbtxcmd_s18_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_MODE, 0x0000, IR_ADDR);
+        if (pbtxcmd_s18_latch) {
+            tx_q_push(IR_CMD_MODE, 0x0000, IR_ADDR);
+            tx_q_push(IR_CMD_PATH, 0x0004, IR_ADDR);
+            tx_q_push(IR_CMD_MANUL_PATH, manual_path_buf, IR_ADDR);
+            tx_q_push(IR_CMD_MANUL_PATH, manual_path_buf, IR_ADDR);
             IR_TX_debug_print(IR_CMD_MODE, 0x0000);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
-            send_ir_packet(IR_CMD_PATH, 0x0004, IR_ADDR);
             IR_TX_debug_print(IR_CMD_PATH, 0x0004);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
-            send_ir_packet(IR_CMD_MANUL_PATH, manual_path_buf, IR_ADDR);
             IR_TX_debug_print(IR_CMD_MANUL_PATH, manual_path_buf);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
-            send_ir_packet(IR_CMD_MANUL_PATH, manual_path_buf, IR_ADDR);
-            IR_TX_debug_print(IR_CMD_MANUL_PATH, manual_path_buf);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
             pbtxcmd_s18_latch = 0;
         }
     } else {
         pbtxcmd_s18_latch = 1;
     }
 
-    /* PB_START: send start command and go to S5 */
+    /* PB_START: queue start command and go to S5 */
     if (PB_START == 0) {
-        if (pbstart_s18_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_START, 0x0000, IR_ADDR);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
+        if (pbstart_s18_latch) {
+            tx_q_push(IR_CMD_START, 0x0000, IR_ADDR);
             IR_TX_debug_print(IR_CMD_START, 0x0000);
             lcd_state = LCD_S5;
             pbstart_s18_latch = 0;
@@ -404,13 +404,11 @@ static void handle_s7_buttons(void)
 {
     if (lcd_state != LCD_S7) { pb0_s7_latch = 1; return; }
 
-    /* JoyStick_SW: resume — send IR start and return to previous running state */
+    /* JoyStick_SW: resume — queue IR start and return to previous running state */
     if (JoyStick_SW == 0) {
-        if (pb0_s7_latch && fsm_state == FSM_IDLE) {
-            send_ir_packet(IR_CMD_START, 0xFF, IR_ADDR);
+        if (pb0_s7_latch) {
+            tx_q_push(IR_CMD_START, 0xFF, IR_ADDR);
             IR_TX_debug_print(IR_CMD_START, 0xFF);
-            while (fsm_state == FSM_IDLE);
-            while (fsm_state != FSM_IDLE);
             lcd_state = s7_resume_state;
             pb0_s7_latch = 0;
         }
@@ -463,6 +461,58 @@ static void update_crossing_display(void)
     }
 }
 
+/* ---- Stop-and-wait half-duplex coordinator ------------------------------ */
+/*
+ * Protocol: EFM8 TX → STM32 RX → STM32 TX → EFM8 RX → EFM8 TX → ...
+ * - After receiving a valid frame from STM32 (addr=0x7), immediately TX next.
+ * - If no RX within 50 ms, TX anyway (deadlock fallback / bootstrap).
+ * - Never TX while RX FSM is mid-frame.
+ * - Queued commands have priority; joystick X/Y sent round-robin in S6 mode.
+ */
+static bit saw_tx_ready    = 0;
+
+static void saw_step(void)
+{
+    static IR_Frame_t xdata pp_frame;
+    TX_Cmd_t txc;
+
+    /* --- Drain all pending RX frames ------------------------------------ */
+    while (IR_RX_get(&pp_frame))
+    {
+        if (pp_frame.addr == IR_ADDR2)
+        {
+            IR_RX_decode_command(&pp_frame);
+            IMUBuffer_push_frame(&pp_frame);
+            saw_tx_ready   = 1;      /* STM32 spoke — our turn next        */
+            pp_idle_ticks = 0;      /* reset deadlock timer                */
+        }
+    }
+
+    /* --- Deadlock / bootstrap timeout (50 ms) --------------------------- */
+    if (pp_idle_ticks >= PP_TIMEOUT_TICKS)
+    {
+        saw_tx_ready   = 1;
+        pp_idle_ticks = 0;
+    }
+
+    /* --- Transmit one packet if it's our turn --------------------------- */
+    if (saw_tx_ready && fsm_state == FSM_IDLE && !IR_RX_is_busy())
+    {
+        /* Priority 1: queued commands (buttons, config, waypoints) */
+        if (tx_q_pop(&txc))
+        {
+            send_ir_packet(txc.cmd, txc.val, txc.addr);
+        }
+        /* Priority 2: NOP heartbeat — keep the exchange alive */
+        else
+        {
+            send_ir_packet(IR_CMD_NOP, 0x0000, IR_ADDR);
+        }
+
+        saw_tx_ready = 0;
+    }
+}
+
 // ---- Main ----
 void main (){
 	static xdata float joystick_x;
@@ -505,6 +555,12 @@ void main (){
         UART0_send_string(" Y=");
         uart0_send_hex_byte(y_byte);
         UART0_send_string("\r\n");
+
+		// In joystick mode, refill queue with fresh X/Y when drained
+		if (lcd_state == LCD_S6 && tx_q_head == tx_q_tail) {
+			tx_q_push(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
+			tx_q_push(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
+		}
 
 		handle_pb_start();
 		handle_pb_pause();
@@ -579,16 +635,9 @@ void main (){
 				prev_rp = right_power;
 			}
 		}*/
-		// Send joystick only in remote mode
-		if (lcd_state == LCD_S6 && fsm_state == FSM_IDLE) {
-			send_ir_packet(IR_CMD_JOYSTICK_X, x_byte, IR_ADDR);
-			while (fsm_state == FSM_IDLE);
-			while (fsm_state != FSM_IDLE);
-
-			send_ir_packet(IR_CMD_JOYSTICK_Y, y_byte, IR_ADDR);
-			while (fsm_state == FSM_IDLE);
-			while (fsm_state != FSM_IDLE);
-		}
+		/* Stop-and-wait coordinator: drain RX, handle deadlock timeout,
+		 * send one queued command or joystick packet per turn. */
+		saw_step();
 		
 	}
 }
